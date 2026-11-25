@@ -1,6 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="io.github.isxlan0.miappxspace" android:versionCode="10000" android:versionName="1.0.0">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="37" />
-    <application android:label="MiApp XSpace" android:allowBackup="false" android:hasCode="true">
+    <application android:label="MiApp XSpace" android:icon="@drawable/ic_launcher" android:theme="@style/AppTheme" android:allowBackup="false" android:hasCode="true">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
+            </intent-filter>
+        </activity>
         <meta-data android:name="xposedmodule" android:value="true" />
         <meta-data android:name="xposeddescription" android:value="额外增加系统分身数量,使系统最多支持3个分身(系统自带一个+模块提供两个位置)" />
         <meta-data android:name="xposedminversion" android:value="82" />

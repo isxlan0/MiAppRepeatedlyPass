@@ -10,7 +10,6 @@ final class AppInfo {
         {"LSPosed", "Xposed 兼容运行框架与作用域管理", "https://github.com/LSPosed/LSPosed"},
         {"KernelSU", "模块安装、启动脚本及挂载机制参考", "https://github.com/tiann/KernelSU"},
         {"Magisk", "模块结构、安装与卸载脚本规范参考", "https://github.com/topjohnwu/Magisk"},
-        {"Android Open Source Project", "用户与 profile 管理、启动可见性和 Binder 实现参考", "https://android.googlesource.com/platform/frameworks/base/"},
-        {"QFun", "README 整体结构、致谢表格与免责声明组织方式参考", "https://github.com/oneQAQone/QFun"}
+        {"Android Open Source Project", "用户与 profile 管理、启动可见性和 Binder 实现参考", "https://android.googlesource.com/platform/frameworks/base/"}
     };
 }

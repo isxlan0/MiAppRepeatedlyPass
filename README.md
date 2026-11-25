@@ -188,7 +188,6 @@ $M create mark.via 997
 | [![KernelSU](https://img.shields.io/badge/KernelSU-Module-orange?style=flat-square&logo=github)](https://github.com/tiann/KernelSU) | **模块运行环境**<br>模块安装、启动脚本与挂载机制参考。 |
 | [![Magisk](https://img.shields.io/badge/Magisk-Module-00AF9C?style=flat-square&logo=github)](https://github.com/topjohnwu/Magisk) | **模块规范参考**<br>模块结构及安装、卸载脚本规范。 |
 | [![AOSP](https://img.shields.io/badge/AOSP-Android-3DDC84?style=flat-square&logo=android)](https://android.googlesource.com/platform/frameworks/base/) | **系统实现参考**<br>用户与 profile 管理、启动可见性和 Binder 调用。 |
-| [![QFun](https://img.shields.io/badge/QFun-README_Reference-8A2BE2?style=flat-square&logo=github)](https://github.com/oneQAQone/QFun) | **文档排版参考**<br>参考 README 的整体结构、致谢表格与免责声明组织方式。 |
 
 </div>
 

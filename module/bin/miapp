@@ -1,0 +1,9 @@
+#!/system/bin/sh
+MODDIR=${0%/*}
+MODDIR=${MODDIR%/*}
+[ "$(id -u)" = 0 ] || { echo "请使用 root shell。" >&2; exit 1; }
+case "$1" in create|create-space)
+  [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || { echo "模块已禁用或待移除，停止创建。" >&2; exit 1; }
+esac
+export CLASSPATH="$MODDIR/bridge.apk"
+exec /system/bin/app_process /system/bin io.github.isxlan0.miappxspace.ProfileControl "$@"

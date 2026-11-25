@@ -47,7 +47,11 @@ def build_apk(source, name):
                       '    static final int VERSION_CODE = '+str(int(code))+';\n}\n', encoding='utf-8')
     java=sorted((source/'java').rglob('*.java'))+[config]
     run('javac','-J-Duser.language=en','-encoding','UTF-8','--release','8','-Xlint:-options','-cp',str(ANDROID)+';'+str(API_CANDIDATES[0]),'-d',classes,*java)
-    run(TOOLS/'d8.bat','--min-api','26','--lib',ANDROID,'--classpath',API_CANDIDATES[0],'--output',dex,*sorted(classes.rglob('*.class')))
+    # A single JAR avoids cmd.exe's command-line limit in deeper Windows checkouts.
+    compiled=BUILD/(name+'-classes.jar')
+    with zipfile.ZipFile(compiled,'w',zipfile.ZIP_DEFLATED) as z:
+        for path in sorted(classes.rglob('*.class')):z.write(path,path.relative_to(classes).as_posix())
+    run(TOOLS/'d8.bat','--min-api','26','--lib',ANDROID,'--classpath',API_CANDIDATES[0],'--output',dex,compiled)
     link=['link','-I',ANDROID,'--manifest',source/'AndroidManifest.xml','-o',BUILD/(name+'-unsigned.apk')]
     if (source/'res').is_dir():
         resources=BUILD/(name+'-resources.zip'); run(TOOLS/'aapt2.exe','compile','--dir',source/'res','-o',resources); link.append(resources)

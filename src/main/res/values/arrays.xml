@@ -1,1 +1,1 @@
-<resources><string-array name="xposed_scope"><item>android</item><item>com.miui.home</item><item>com.miui.securitycore</item><item>com.miui.securitycenter</item><item>com.android.systemui</item></string-array></resources>
+<resources><string-array name="xposed_scope"><item>android</item><item>com.miui.home</item><item>com.miui.securitycore</item><item>com.miui.securitycenter</item><item>com.android.systemui</item><item>com.android.settings</item></string-array></resources>

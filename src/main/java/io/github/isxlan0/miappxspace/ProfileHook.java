@@ -28,13 +28,14 @@ public final class ProfileHook implements IXposedHookLoadPackage {
             XposedBridge.log(TAG+": unsupported Android API");return;
         }
         if(!"android".equals(p.packageName)){
-            if("com.miui.home".equals(p.packageName)||"com.miui.securitycore".equals(p.packageName)||"com.miui.securitycenter".equals(p.packageName)||"com.android.systemui".equals(p.packageName)){
+            if("com.miui.home".equals(p.packageName)||"com.miui.securitycore".equals(p.packageName)||"com.miui.securitycenter".equals(p.packageName)||"com.android.systemui".equals(p.packageName)||"com.android.settings".equals(p.packageName)){
                 if("com.miui.securitycore".equals(p.packageName))try{JavaBindings.prepare(p.appInfo.sourceDir,p.classLoader);}
                 catch(Exception error){XposedBridge.log(TAG+": Java adaptation refused: "+error);return;}
                 ClientHook.install(p);
                 if("com.miui.securitycore".equals(p.packageName))SecurityUi.install(p.classLoader);
                 if("com.miui.securitycenter".equals(p.packageName))try{ManagementHooks.install(p.appInfo.sourceDir,p.classLoader);}
                 catch(Exception error){XposedBridge.log(TAG+": App management adaptation refused: "+error);}
+                if("com.android.settings".equals(p.packageName))NotificationHooks.install(p.classLoader);
             }
             return;
         }

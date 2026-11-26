@@ -56,6 +56,6 @@ if /system/bin/pm path dev.miapp.instances 2>/dev/null | grep -q '^package:'; th
   ui_print "- 检测到旧 Hook 包 dev.miapp.instances，请在 LSPosed 禁用并手动卸载旧 APK，避免同时启用。"
 fi
 "$MODPATH/bin/miapp" refresh-titles >> "$MODPATH/status.log" 2>&1 || ui_print "- 桌面名称缓存将在服务启动后初始化。"
-ui_print "- 在 LSPosed 启用 io.github.isxlan0.miappxspace，选择系统框架、系统桌面、安全核心组件、手机管家、系统界面。"
+ui_print "- 在 LSPosed 启用 io.github.isxlan0.miappxspace，选择系统框架、系统桌面、安全核心组件、手机管家、系统界面、设置。"
 ui_print "- 包名已更新，需在 LSPosed 重新启用新模块并重启；旧 ID 模块已禁用，可在管理器移除。"
 ui_print "- 卸载之前请先在 应用设置 → 应用双开 → 设置 中选择删除双开账户，然后卸载 LSP 模块 APK，最后卸载 Magisk / KernelSU 模块，否则可能导致系统异常。"

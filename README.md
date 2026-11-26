@@ -1,7 +1,7 @@
 <div align="center">
 <h1>MiApp XSpace</h1>
 
-![Version](https://img.shields.io/badge/Version-1.0.1-blue?style=flat-square)
+![Version](https://img.shields.io/badge/Version-1.0.2-blue?style=flat-square)
 ![Java](https://img.shields.io/badge/Java-8-ED8B00?style=flat-square&logo=openjdk&logoColor=white)
 ![C++](https://img.shields.io/badge/Native-C%2B%2B17-00599C?style=flat-square&logo=cplusplus&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)
@@ -46,7 +46,7 @@
 
 ### 🛠 Hook 与系统适配
 
-* **Xposed API 82**：接入系统框架、桌面、安全核心组件、手机管家和 SystemUI。
+* **Xposed API 82**：接入系统框架、桌面、安全核心组件、手机管家、SystemUI 和设置。
 * **LSPosed**：负责 Hook 模块加载与作用域管理。
 * **Android 原生 CLONE profile**：为分身提供独立空间与数据，保留应用原包名和签名。
 
@@ -98,7 +98,7 @@ python build.py
 ```
 
 * **Hook APK**：`dist/bridge.apk`
-* **模块安装包**：`dist/MiAppXSpace-1.0.1.zip`
+* **模块安装包**：`dist/MiAppXSpace-1.0.2.zip`
 * **本地签名**：首次构建自动生成 `.local/signing.p12`，后续构建请保留以复用签名。
 
 > 💡 SDK 不在默认位置时可设置 `ANDROID_SDK_ROOT` 或 `ANDROID_HOME`；Xposed API 不在 Gradle 缓存中时，可通过 `XPOSED_API_JAR` 指定完整路径。
@@ -108,12 +108,12 @@ python build.py
 ### 安装步骤
 
 1. 在 Magisk / KernelSU 中安装模块 ZIP。
-2. 在 LSPosed 中启用 **MiApp XSpace**，作用域勾选系统框架、系统桌面、安全核心组件、手机管家、SystemUI。
+2. 在 LSPosed 中启用 **MiApp XSpace**，作用域勾选系统框架、系统桌面、安全核心组件、手机管家、SystemUI、设置。
 3. 手动重启设备，在系统「应用设置 → 应用双开」中创建与管理分身。
 
 | 项目 | 标识 |
 | :--- | :--- |
-| **模块版本** | `1.0.1`（versionCode `10001`） |
+| **模块版本** | `1.0.2`（versionCode `10002`） |
 | **模块 ID** | `miapp_xspace` |
 | **LSP 包名** | `io.github.isxlan0.miappxspace` |
 
@@ -150,14 +150,6 @@ python build.py
 * **模块日志**：`/data/adb/modules/miapp_xspace/` 下的 `status.log`、`boot-spaces.log`、`titles.log`、`launcher-repair.log`。
 * **安装扫描失败**：安装界面会显示具体失败阶段与退出码；失败日志另存到 `/data/adb/miapp_xspace-prepare.log`，避免安装器删除暂存目录时一起丢失。该文件记录最近一次失败，成功安装的报告请查看模块目录。
 * **Hook 日志**：可提供 LSPosed 中与 `MiAppXSpace` 有关的日志；分享前请自行移除个人信息。
-
-### 已知问题
-
-| BUG 描述 | 发现者 |
-| :--- | :--- |
-| 无法为分身 3 和 4 设置通知管理 | 作者 |
-| 无法为分身 3 和 4 设置权限管理 | 作者 |
-| 分身234无法在应用设置搜到,导致长按图标设置权限实际设置的是主APP | 作者 |
 
 ### 调试命令
 

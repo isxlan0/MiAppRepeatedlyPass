@@ -1,0 +1,119 @@
+name: Build and release
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: '1'
+
+jobs:
+  build:
+    name: Build installable ZIP
+    runs-on: windows-2025
+    timeout-minutes: 40
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      artifact: ${{ steps.metadata.outputs.artifact }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Test build and release logic
+        run: python -m unittest discover -s ci -p 'test_*.py' -v
+      - name: Read release metadata
+        id: metadata
+        run: python release_metadata.py --github-output "$env:GITHUB_OUTPUT"
+      - name: Restore signing key
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          MIAPP_SIGNING_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_KEYSTORE_BASE64) -or [string]::IsNullOrEmpty($env:MIAPP_SIGNING_PASSWORD)) {
+            throw 'Configure SIGNING_KEYSTORE_BASE64 and SIGNING_KEYSTORE_PASSWORD repository Secrets.'
+          }
+          $signingPath = Join-Path $env:RUNNER_TEMP 'miapp-signing.p12'
+          [IO.File]::WriteAllBytes($signingPath, [Convert]::FromBase64String($env:SIGNING_KEYSTORE_BASE64))
+          "MIAPP_SIGNING_KEYSTORE=$signingPath" >> $env:GITHUB_ENV
+      - name: Prepare Android SDK
+        run: |
+          $sdkPath = $env:ANDROID_HOME
+          if ([string]::IsNullOrEmpty($sdkPath)) { throw 'ANDROID_HOME is missing on this runner.' }
+          $sdkManager = Join-Path $sdkPath 'cmdline-tools/latest/bin/sdkmanager.bat'
+          if (-not (Test-Path -LiteralPath $sdkManager)) { throw 'Android sdkmanager is missing.' }
+          1..100 | ForEach-Object { 'y' } | & $sdkManager --licenses
+          if ($LASTEXITCODE -ne 0) { throw 'Android SDK license acceptance failed.' }
+          & $sdkManager 'build-tools;37.0.0' 'platforms;android-37.0' 'ndk;30.0.16248370'
+          if ($LASTEXITCODE -ne 0) { throw 'Android SDK installation failed.' }
+          "ANDROID_SDK_ROOT=$sdkPath" >> $env:GITHUB_ENV
+      - name: Download Xposed API 82
+        run: |
+          $apiPath = Join-Path $env:RUNNER_TEMP 'xposed-api-82.jar'
+          Invoke-WebRequest -Uri 'https://api.xposed.info/de/robv/android/xposed/api/82/api-82.jar' -OutFile $apiPath
+          $expectedHash = 'f48c635f1c7469fdec0e00ad2ea0b7a6b2f5b55065784a35b7ca3a84615e8e25'
+          if ((Get-FileHash -LiteralPath $apiPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
+            throw 'Xposed API checksum mismatch.'
+          }
+          "XPOSED_API_JAR=$apiPath" >> $env:GITHUB_ENV
+      - name: Build and verify package
+        env:
+          MIAPP_SIGNING_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
+        run: |
+          python build.py
+          if ($LASTEXITCODE -ne 0) { throw 'Module build failed.' }
+          python ci/verify_package.py
+          if ($LASTEXITCODE -ne 0) { throw 'Package verification failed.' }
+      - name: Upload installable ZIP
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.metadata.outputs.artifact }}
+          path: dist/${{ steps.metadata.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - name: Remove temporary signing key
+        if: always()
+        run: |
+          $signingPath = Join-Path $env:RUNNER_TEMP 'miapp-signing.p12'
+          if (Test-Path -LiteralPath $signingPath) { Remove-Item -LiteralPath $signingPath -Force }
+
+  release:
+    name: Publish a newer version from main
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      # Serialize different versions too, so an older build cannot publish after a newer one.
+      group: release-main
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: dist
+      - name: Publish only if the version increased
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python ci/publish_release.py

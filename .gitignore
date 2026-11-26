@@ -8,6 +8,7 @@
 /tests/
 *.md
 !/README.md
+!/CHANGELOG.md
 
 # Build outputs and caches
 /build/

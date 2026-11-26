@@ -1,7 +1,7 @@
 <div align="center">
 <h1>MiApp XSpace</h1>
 
-![Version](https://img.shields.io/badge/Version-1.0.2-blue?style=flat-square)
+![Version](https://img.shields.io/github/v/release/isxlan0/MiAppRepeatedlyPass?style=flat-square)
 ![Java](https://img.shields.io/badge/Java-8-ED8B00?style=flat-square&logo=openjdk&logoColor=white)
 ![C++](https://img.shields.io/badge/Native-C%2B%2B17-00599C?style=flat-square&logo=cplusplus&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)
@@ -98,7 +98,7 @@ python build.py
 ```
 
 * **Hook APK**：`dist/bridge.apk`
-* **模块安装包**：`dist/MiAppXSpace-1.0.2.zip`
+* **模块安装包**：`dist/MiAppXSpace-<版本号>.zip`
 * **本地签名**：首次构建自动生成 `.local/signing.p12`，后续构建请保留以复用签名。
 
 > 💡 SDK 不在默认位置时可设置 `ANDROID_SDK_ROOT` 或 `ANDROID_HOME`；Xposed API 不在 Gradle 缓存中时，可通过 `XPOSED_API_JAR` 指定完整路径。
@@ -113,7 +113,7 @@ python build.py
 
 | 项目 | 标识 |
 | :--- | :--- |
-| **模块版本** | `1.0.2`（versionCode `10002`） |
+| **模块版本** | 见 [更新日志](CHANGELOG.md)；已发布版本见 [Releases](https://github.com/isxlan0/MiAppRepeatedlyPass/releases) |
 | **模块 ID** | `miapp_xspace` |
 | **LSP 包名** | `io.github.isxlan0.miappxspace` |
 

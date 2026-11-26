@@ -15,7 +15,7 @@ final class DisplayHooks {
         try{
             if(ProfileBackend.pm==null)ProfileBackend.pm=ProfileBackend.service("package","android.content.pm.IPackageManager");
             String[] names=(String[])Reflect.call(ProfileBackend.pm,"getPackagesForUid",Binder.getCallingUid());
-            if(names!=null)for(String name:names)if(name.equals("com.miui.home")||name.equals("com.android.systemui")||name.equals("com.miui.securitycore"))return true;
+            if(names!=null)for(String name:names)if(name.equals("com.miui.home")||name.equals("com.android.systemui")||name.equals("com.miui.securitycore")||name.equals("com.miui.securitycenter")||name.equals("com.android.settings"))return true;
         }catch(Exception ignored){}
         return false;
     }
@@ -39,12 +39,14 @@ final class DisplayHooks {
             @Override protected void afterHookedMethod(MethodHookParam m){if(!m.hasThrowable()&&isClone((Integer)m.args[0]))m.setResult(false);}
         });
         Class<?> packages=XposedHelpers.findClass("com.android.server.pm.PackageManagerService$IPackageManagerImpl",loader);
-        for(String method:new String[]{"getApplicationInfo","getActivityInfo"})XposedBridge.hookAllMethods(Reflect.declaringClass(packages,method),method,new XC_MethodHook(){
+        for(String method:new String[]{"getApplicationInfo","getActivityInfo","getPackageInfo"})XposedBridge.hookAllMethods(Reflect.declaringClass(packages,method),method,new XC_MethodHook(){
             @Override protected void afterHookedMethod(MethodHookParam m)throws Throwable{
                 if(m.hasThrowable()||m.getResult()==null||!uiCaller())return;
-                Object value=m.getResult();ApplicationInfo info=value instanceof ActivityInfo?((ActivityInfo)value).applicationInfo:value instanceof ApplicationInfo?(ApplicationInfo)value:null;
+                Object value=m.getResult();ApplicationInfo info=value instanceof ActivityInfo?((ActivityInfo)value).applicationInfo:value instanceof PackageInfo?((PackageInfo)value).applicationInfo:value instanceof ApplicationInfo?(ApplicationInfo)value:null;
                 if(info==null||!isClone(info.uid/100000))return;
-                int id=info.uid/100000;m.setResult(value instanceof ActivityInfo?activity((ActivityInfo)value,id):app(info,id));
+                int id=info.uid/100000;
+                if(value instanceof PackageInfo){PackageInfo copy=ManagementHooks.copy((PackageInfo)value);copy.applicationInfo=app(info,id);m.setResult(copy);}
+                else m.setResult(value instanceof ActivityInfo?activity((ActivityInfo)value,id):app(info,id));
             }
         });
         Class<?> launcher=XposedHelpers.findClass("com.android.server.pm.LauncherAppsService$LauncherAppsImpl",loader);

@@ -33,6 +33,8 @@ public final class ProfileHook implements IXposedHookLoadPackage {
                 catch(Exception error){XposedBridge.log(TAG+": Java adaptation refused: "+error);return;}
                 ClientHook.install(p);
                 if("com.miui.securitycore".equals(p.packageName))SecurityUi.install(p.classLoader);
+                if("com.miui.securitycenter".equals(p.packageName))try{ManagementHooks.install(p.appInfo.sourceDir,p.classLoader);}
+                catch(Exception error){XposedBridge.log(TAG+": App management adaptation refused: "+error);}
             }
             return;
         }
@@ -115,6 +117,7 @@ public final class ProfileHook implements IXposedHookLoadPackage {
         Class<?> manager=XposedHelpers.findClass("com.miui.server.xspace.XSpaceManagerServiceImpl",p.classLoader);
         ProfileBackend.install(p.classLoader);
         DisplayHooks.install(p.classLoader);
+        ManagementRouting.install(p.classLoader);
         // Extend the existing MIUI resolver using actual installed native instances.
         if(XposedBridge.hookAllMethods(manager,"checkXSpaceControl",new XC_MethodHook(){
             @Override protected void beforeHookedMethod(MethodHookParam m)throws Throwable{

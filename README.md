@@ -1,7 +1,7 @@
 <div align="center">
-    <h1>MiApp XSpace</h1>
+<h1>MiApp XSpace</h1>
 
-![Version](https://img.shields.io/badge/Version-1.0.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/Version-1.0.1-blue?style=flat-square)
 ![Java](https://img.shields.io/badge/Java-8-ED8B00?style=flat-square&logo=openjdk&logoColor=white)
 ![C++](https://img.shields.io/badge/Native-C%2B%2B17-00599C?style=flat-square&logo=cplusplus&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)
@@ -61,9 +61,10 @@
 ### Android 系统
 
 * **Hook 与模块安装要求**：当前代码使用 SDK 37 系统接口。
-* **模块 APK 最低版本**：Android 8.0（API 26），能够打开页面不代表该系统支持分身 Hook。
+* **模块 APK 最低版本**：Android 8.0（API 26），测试和使用均为OS4系统，其他系统不保证。
 * **原生架构**：`arm64-v8a`。
-* **兼容性检查**：检查系统框架、桌面和原生库版本，不按设备代号或 ROM 版本字符串直接限制。
+* **原生自动适配**：安装 ZIP 时从当前 ROM 提取并生成补丁。
+* **Java 自动适配**：安装 ZIP 时从当前系统 APK 提取并生成补丁
 
 ### 已测试设备
 
@@ -71,9 +72,8 @@
 
 | 型号 | 系统版本 | 备注 |
 | :--- | :--- | :--- |
-| 小米 Pad 8 Pro | `OS4.0.6.0` | 当前原生库适配与验证设备 |
+| 小米 Pad 8 Pro | `OS4.0.6.0` | 实测可用 |
 
-> ⚠️ 原生适配依赖具体的系统和库实现。安装器保留二进制兼容性校验，其他设备或系统版本需要实际验证。
 
 ### 框架支持
 
@@ -98,12 +98,10 @@ python build.py
 ```
 
 * **Hook APK**：`dist/bridge.apk`
-* **模块安装包**：`dist/MiAppXSpace-1.0.0.zip`
+* **模块安装包**：`dist/MiAppXSpace-1.0.1.zip`
 * **本地签名**：首次构建自动生成 `.local/signing.p12`，后续构建请保留以复用签名。
 
 > 💡 SDK 不在默认位置时可设置 `ANDROID_SDK_ROOT` 或 `ANDROID_HOME`；Xposed API 不在 Gradle 缓存中时，可通过 `XPOSED_API_JAR` 指定完整路径。
-
-源码中的三个 `libmiapp_*` 原始转发库是必需依赖；三个 `libhyper_os_*` 包装库由源码生成。构建输出、签名密钥、修复记录和截图均不提交 Git。
 
 # 安装与使用
 
@@ -115,7 +113,7 @@ python build.py
 
 | 项目 | 标识 |
 | :--- | :--- |
-| **模块版本** | `1.0.0`（versionCode `10000`） |
+| **模块版本** | `1.0.1`（versionCode `10001`） |
 | **模块 ID** | `miapp_xspace` |
 | **LSP 包名** | `io.github.isxlan0.miappxspace` |
 
@@ -150,6 +148,7 @@ python build.py
 
 * **问题反馈**：[GitHub Issues](https://github.com/isxlan0/MiAppRepeatedlyPass/issues)
 * **模块日志**：`/data/adb/modules/miapp_xspace/` 下的 `status.log`、`boot-spaces.log`、`titles.log`、`launcher-repair.log`。
+* **安装扫描失败**：安装界面会显示具体失败阶段与退出码；失败日志另存到 `/data/adb/miapp_xspace-prepare.log`，避免安装器删除暂存目录时一起丢失。该文件记录最近一次失败，成功安装的报告请查看模块目录。
 * **Hook 日志**：可提供 LSPosed 中与 `MiAppXSpace` 有关的日志；分享前请自行移除个人信息。
 
 ### 已知问题
@@ -158,6 +157,7 @@ python build.py
 | :--- | :--- |
 | 无法为分身 3 和 4 设置通知管理 | 作者 |
 | 无法为分身 3 和 4 设置权限管理 | 作者 |
+| 分身234无法在应用设置搜到,导致长按图标设置权限实际设置的是主APP | 作者 |
 
 ### 调试命令
 
@@ -183,15 +183,20 @@ $M create mark.via 997
 
 | Open Source Project | Role & Description |
 | :--- | :--- |
-| [![Xposed](https://img.shields.io/badge/Xposed-Hook_API-green?style=flat-square&logo=android)](https://github.com/rovo89/XposedBridge) | **Hook 接口**<br>使用 Xposed API 82 接入系统与应用进程。 |
-| [![LSPosed](https://img.shields.io/badge/LSPosed-Framework-blue?style=flat-square&logo=android)](https://github.com/LSPosed/LSPosed) | **Xposed 运行框架**<br>提供模块加载与作用域管理。 |
-| [![KernelSU](https://img.shields.io/badge/KernelSU-Module-orange?style=flat-square&logo=github)](https://github.com/tiann/KernelSU) | **模块运行环境**<br>模块安装、启动脚本与挂载机制参考。 |
-| [![Magisk](https://img.shields.io/badge/Magisk-Module-00AF9C?style=flat-square&logo=github)](https://github.com/topjohnwu/Magisk) | **模块规范参考**<br>模块结构及安装、卸载脚本规范。 |
-| [![AOSP](https://img.shields.io/badge/AOSP-Android-3DDC84?style=flat-square&logo=android)](https://android.googlesource.com/platform/frameworks/base/) | **系统实现参考**<br>用户与 profile 管理、启动可见性和 Binder 调用。 |
+| [![Xposed](https://img.shields.io/badge/Xposed-Hook_API-green?style=flat-square&logo=android)](https://github.com/rovo89/XposedBridge) | **Hook 接口**
+使用 Xposed API 82 接入系统与应用进程。 |
+| [![LSPosed](https://img.shields.io/badge/LSPosed-Framework-blue?style=flat-square&logo=android)](https://github.com/LSPosed/LSPosed) | **Xposed 运行框架**
+提供模块加载与作用域管理。 |
+| [![KernelSU](https://img.shields.io/badge/KernelSU-Module-orange?style=flat-square&logo=github)](https://github.com/tiann/KernelSU) | **模块运行环境**
+模块安装、启动脚本与挂载机制参考。 |
+| [![Magisk](https://img.shields.io/badge/Magisk-Module-00AF9C?style=flat-square&logo=github)](https://github.com/topjohnwu/Magisk) | **模块规范参考**
+模块结构及安装、卸载脚本规范。 |
+| [![AOSP](https://img.shields.io/badge/AOSP-Android-3DDC84?style=flat-square&logo=android)](https://android.googlesource.com/platform/frameworks/base/) | **系统实现参考**
+用户与 profile 管理、启动可见性和 Binder 调用。 |
 
 </div>
 
-三个 `libmiapp_*` 原始转发库来自适配设备的 HyperOS ROM，不是本项目原创代码，权利归相应权利人。Hybrid Mount 是原生库挂载流程的外部依赖。原创代码采用 [MIT License](LICENSE)，依赖项目和系统组件遵循各自许可证。
+安装时生成的三个 `libmiapp_*` 原始转发库来自安装设备自身的 HyperOS ROM，不是本项目原创代码，权利归相应权利人；本项目安装包不附带这些 ROM 原件。Hybrid Mount 是原生库挂载流程的外部依赖。原创代码采用 [MIT License](LICENSE)。
 
 <br/>
 
@@ -211,3 +216,7 @@ $M create mark.via 997
 Made with ❤️ by [isxlan0](https://github.com/isxlan0)
 
 </div>
+
+```
+
+```

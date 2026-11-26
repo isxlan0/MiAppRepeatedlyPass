@@ -54,7 +54,6 @@
 
 * **Python / Android SDK / NDK**：编译 Java、原生代码、签名 APK，并打包安装 ZIP。
 * **Magisk / KernelSU 模块结构**：安装 Hook APK、挂载原生库并运行后台服务。
-* **Hybrid Mount**：当前原生库挂载流程依赖的外部模块。
 
 # 适配与运行环境
 
@@ -82,7 +81,7 @@
 | :--- | :--- | :--- |
 | **Root 环境** | Magisk / KernelSU | 安装模块并运行 root 后台服务 |
 | **Hook 框架** | LSPosed + Zygisk | 加载模块并配置系统作用域 |
-| **元模块挂载** | Hybrid Mount | 要求安装元模块,编译挂载system |
+| **系统文件映射** | Magisk 内置挂载或支持系统文件映射的 KernelSU 元模块 | 重启后，桌面需能从 `/system_ext/lib64` 加载模块 `system/system_ext/lib64` 中替换和新增的库。Hybrid Mount 已实测。 |
 
 # 从源码构建
 
@@ -189,7 +188,7 @@ $M create mark.via 997
 
 </div>
 
-安装时生成的三个 `libmiapp_*` 原始转发库来自安装设备自身的 HyperOS ROM，不是本项目原创代码，权利归相应权利人；本项目安装包不附带这些 ROM 原件。Hybrid Mount 是原生库挂载流程的外部依赖。原创代码采用 [MIT License](LICENSE)。
+安装时生成的三个 `libmiapp_*` 原始转发库来自安装设备自身的 HyperOS ROM，不是本项目原创代码，权利归相应权利人；本项目安装包不附带这些 ROM 原件。原创代码采用 [MIT License](LICENSE)。
 
 <br/>
 

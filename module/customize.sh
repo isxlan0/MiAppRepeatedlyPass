@@ -4,7 +4,6 @@
 [ "$API" = 37 ] || abort "仅适配 SDK 37。"
 [ -d /data/adb/modules/zygisk_lsposed ] || abort "请先安装并启用 LSPosed。"
 [ ! -f /data/adb/modules/zygisk_lsposed/disable ] || abort "LSPosed 处于禁用状态。"
-[ -d /data/adb/modules/hybrid_mount ] || abort "此原生桌面适配需要现有 Hybrid Mount metamodule。"
 . "$MODPATH/upgrade.sh"
 for legacy_module in /data/adb/modules/miapp_instances /data/adb/modules_update/miapp_instances; do
   miapp_check_legacy_module "$legacy_module" || abort "旧版模块已安排卸载；请先在管理器取消卸载，再安装新版以保留分身。"

@@ -93,7 +93,7 @@ public final class MainActivity extends Activity {
         for (String[] credit : AppInfo.CREDITS) {
             link(credits, credit[0], credit[2]); text(credits, credit[1], 14, muted, false);
         }
-        text(credits, "原始转发库来自适配设备的 HyperOS ROM；小米 / HyperOS 系统组件并非本项目原创，其权利归相应权利人。Hybrid Mount 是当前原生库挂载流程的外部依赖。", 14, muted, false);
+        text(credits, "原始转发库来自适配设备的 HyperOS ROM；小米 / HyperOS 系统组件并非本项目原创，其权利归相应权利人。", 14, muted, false);
         LinearLayout known = card("已知问题");
         text(known, "分身 3 和 4 暂时无法分别设置通知管理、权限管理。其他设备与系统版本仍需验证。", 14, muted, false);
         LinearLayout uninstall = card("卸载说明"); text(uninstall, AppInfo.UNINSTALL, 14, ink, false);

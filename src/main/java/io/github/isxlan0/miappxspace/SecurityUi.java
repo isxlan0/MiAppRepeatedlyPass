@@ -13,14 +13,13 @@ final class SecurityUi {
     static final String SETTING="com.miui.xspace.ui.activity.XSpaceSettingActivity";
     static void install(ClassLoader loader)throws Throwable{
         // The stock service must never adopt an extra CLONE when 999 is absent.
-        XposedBridge.hookAllMethods(XposedHelpers.findClass("F3.a",loader),"p",new XC_MethodHook(){
+        XposedBridge.hookMethod(JavaBindings.method("stock.user"),new XC_MethodHook(){
             @Override protected void beforeHookedMethod(MethodHookParam m)throws Throwable{
                 if(m.args.length==1&&m.args[0] instanceof UserManager)m.setResult(Reflect.call(m.args[0],"getUserInfo",999));
             }
         });
         AccountResetUi.install(loader);
-        Class<?> service=XposedHelpers.findClass("com.miui.xspace.service.XSpaceService",loader);
-        XposedBridge.hookAllMethods(service,"a",new XC_MethodHook(){
+        XposedBridge.hookMethod(JavaBindings.method("stock.change"),new XC_MethodHook(){
             @Override protected void beforeHookedMethod(MethodHookParam m)throws Throwable{
                 if(m.args.length!=3||!(m.args[1] instanceof String)||!(m.args[2] instanceof Boolean))return;
                 String pkg=(String)m.args[1];boolean enable=(Boolean)m.args[2];
@@ -32,30 +31,28 @@ final class SecurityUi {
                 }
             }
         });
-        Class<?> adapter=XposedHelpers.findClass("j3.h",loader);
-        XposedBridge.hookAllMethods(adapter,"onBindViewHolder",new XC_MethodHook(){
+        XposedBridge.hookMethod(JavaBindings.method("ui.bind"),new XC_MethodHook(){
             @Override protected void afterHookedMethod(MethodHookParam m)throws Throwable{
                 if(m.args.length!=2||!(m.args[1] instanceof Integer))return;
-                List<?> data=(List<?>)XposedHelpers.getObjectField(m.thisObject,"b");
+                List<?> data=(List<?>)JavaBindings.get("ui.data",m.thisObject);
                 int position=(Integer)m.args[1];if(position<0||position>=data.size())return;
-                Object item=data.get(position);String pkg=(String)XposedHelpers.getObjectField(item,"b");
+                Object item=data.get(position);String pkg=(String)JavaBindings.get("ui.package",item);
                 if(pkg==null||!Registry.PACKAGE.matcher(pkg).matches())return;
-                View row=(View)XposedHelpers.getObjectField(m.args[0],"itemView");Context context=row.getContext();
-                CharSequence label=(CharSequence)XposedHelpers.getObjectField(item,"a");
+                View row=(View)JavaBindings.get("ui.row",m.args[0]);Context context=row.getContext();
+                CharSequence label=(CharSequence)JavaBindings.get("ui.label",item);
                 row.setOnClickListener(v->NativePages.open(context,pkg,-1));
-                TextView title=(TextView)row.findViewById(2131363044);
+                TextView title=(TextView)row.findViewById(JavaBindings.resource("id/title"));
                 if(title!=null){title.setText(label);title.setContentDescription(label+"，点击管理分身");}
-                View toggle=row.findViewById(2131362879);
+                View toggle=row.findViewById(JavaBindings.resource("id/sliding_button"));
                 if(toggle!=null){toggle.setVisibility(View.GONE);toggle.setEnabled(false);toggle.setClickable(false);}
-                TextView summary=(TextView)row.findViewById(2131362207);
+                TextView summary=(TextView)row.findViewById(JavaBindings.resource("id/enable"));
                 if(summary!=null){summary.setText("管理分身");summary.setVisibility(View.VISIBLE);}
             }
         });
         NativePages.install(loader);
-        Class<?> runnable=XposedHelpers.findClass("n3.d",loader);
-        XposedBridge.hookAllMethods(runnable,"run",new XC_MethodHook(){
+        XposedBridge.hookMethod(JavaBindings.method("ui.resolve"),new XC_MethodHook(){
             @Override protected void beforeHookedMethod(MethodHookParam m)throws Throwable{
-                Intent outer=(Intent)XposedHelpers.getObjectField(m.thisObject,"c");
+                Intent outer=(Intent)JavaBindings.get("resolver.outer",m.thisObject);
                 String pkg=outer.getStringExtra("android.intent.extra.xspace_resolver_activity_aim_package");
                 if(pkg==null)return;
                 int[] ids=ProfileRpc.call("instances",pkg,-1).getIntArray("ids");
@@ -102,10 +99,10 @@ final class SecurityUi {
                             ProfileBackend.service("user","android.os.IUserManager"),id);
     }
     static void chooser(Object runner,Intent outer,String pkg,int[] ids)throws Exception{
-        Activity activity=(Activity)XposedHelpers.getObjectField(runner,"b");Context context=activity;
+        Activity activity=(Activity)JavaBindings.get("resolver.activity",runner);Context context=activity;
         Intent original=outer.getParcelableExtra("android.intent.extra.xspace_resolver_activity_original_intent");
         if(original==null)throw new IllegalArgumentException("Missing original Intent");
-        XposedHelpers.setObjectField(runner,"d",original);XposedHelpers.setObjectField(runner,"e",pkg);
+        JavaBindings.set("resolver.original",runner,original);JavaBindings.set("resolver.package",runner,pkg);
         String key=original.getComponent()==null?pkg:original.getComponent().getClassName();
         String calling=original.getStringExtra("miui.intent.extra.xspace_resolver_activity_calling_package");
         if("com.miui.voiceassist".equals(calling)||"com.google.android.googlequicksearchbox".equals(calling))key=calling+"-"+pkg;
@@ -116,8 +113,8 @@ final class SecurityUi {
         if(saved<0){int ask=(Integer)XposedHelpers.callStaticMethod(settings,"getAskType",context,key);if(ask==1)saved=0;else if(ask==2)saved=999;}
         for(int id:ids)if(id==saved){launch(runner,original,outer,id);return;}
         if(saved>=0)prefs.edit().remove(savedKey).apply();
-        Object builder=XposedHelpers.getObjectField(runner,"h");
-        Reflect.call(builder,"c",false);Reflect.call(builder,"h");Reflect.call(builder,"w","选择要使用的应用");
+        Object builder=JavaBindings.get("resolver.builder",runner);
+        JavaBindings.call("dialog.cancelable",builder,false);JavaBindings.call("dialog.icon",builder);JavaBindings.call("dialog.title",builder,"选择要使用的应用");
         LinearLayout content=new LinearLayout(context);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(dp(context,20),dp(context,6),dp(context,20),dp(context,8));
         CheckBox remember=new CheckBox(context);remember.setText("下次默认选择此项，不再提示");
         LinearLayout list=new LinearLayout(context);list.setOrientation(LinearLayout.VERTICAL);
@@ -137,8 +134,8 @@ final class SecurityUi {
             });list.addView(row);
         }
         ScrollView scroll=new ScrollView(context);scroll.addView(list);content.addView(scroll,new LinearLayout.LayoutParams(-1,Math.min(dp(context,360),dp(context,76)*ids.length)));
-        content.addView(remember);Reflect.call(builder,"x",content);
-        Reflect.call(builder,"l",android.R.string.cancel,(DialogInterface.OnClickListener)(d,n)->activity.finish());
+        content.addView(remember);JavaBindings.call("dialog.view",builder,content);
+        JavaBindings.call("dialog.cancel",builder,android.R.string.cancel,(DialogInterface.OnClickListener)(d,n)->activity.finish());
     }
     static void launch(Object runner,Intent original,Intent outer,int id)throws Exception{
         Class<?> compat=XposedHelpers.findClass("miui.securityspace.XSpaceIntentCompat",runner.getClass().getClassLoader());
@@ -146,6 +143,6 @@ final class SecurityUi {
         original.putExtra("android.intent.extra.xspace_userid_selected",true);
         original.putExtra("android.intent.extra.picked_user_id",id);
         android.util.Log.i(ProfileHook.TAG,"Selected package="+original.getComponent()+" actualUser="+id+" displayNumber="+(id==0?1:1001-id));
-        Reflect.call(runner,"a",id);
+        JavaBindings.call("ui.launch",runner,id);
     }
 }

@@ -29,16 +29,20 @@ public final class ProfileHook implements IXposedHookLoadPackage {
         }
         if(!"android".equals(p.packageName)){
             if("com.miui.home".equals(p.packageName)||"com.miui.securitycore".equals(p.packageName)||"com.miui.securitycenter".equals(p.packageName)||"com.android.systemui".equals(p.packageName)){
+                if("com.miui.securitycore".equals(p.packageName))try{JavaBindings.prepare(p.appInfo.sourceDir,p.classLoader);}
+                catch(Exception error){XposedBridge.log(TAG+": Java adaptation refused: "+error);return;}
                 ClientHook.install(p);
                 if("com.miui.securitycore".equals(p.packageName))SecurityUi.install(p.classLoader);
             }
             return;
         }
         if(!("android".equals(p.processName)||"system_server".equals(p.processName)))return;
+        try{JavaPrepare.framework(new File("/system"),new File("/system_ext"),JavaPrepare.patterns(),new Properties());}
+        catch(Exception error){XposedBridge.log(TAG+": Framework adaptation refused: "+error);return;}
         Class<?> ums=XposedHelpers.findClass("com.android.server.pm.UserManagerService",p.classLoader);
         Class<?> details=XposedHelpers.findClass("com.android.server.pm.UserTypeDetails",p.classLoader);
         Class<?> xspace=XposedHelpers.findClass("miui.securityspace.XSpaceUserHandle",p.classLoader);
-        // SecurityCore F3.a.p selects the first XSpace-flagged entry; preserve its stock 999 target.
+        // The stock SecurityCore selector uses the first XSpace entry; preserve its 999 target.
         if(XposedBridge.hookAllMethods(ums,"getProfiles",new XC_MethodHook(){
             @Override protected void afterHookedMethod(MethodHookParam m)throws Throwable{
                 if(m.hasThrowable()||!(m.getResult() instanceof List))return;

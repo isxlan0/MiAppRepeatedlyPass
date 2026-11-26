@@ -4,6 +4,10 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 final class Reflect {
+    static Class<?> declaringClass(Class<?> type,String name)throws NoSuchMethodException {
+        for(Class<?> c=type;c!=null;c=c.getSuperclass())for(Method method:c.getDeclaredMethods())if(method.getName().equals(name))return c;
+        throw new NoSuchMethodException(type.getName()+"."+name);
+    }
     static Object call(Object target, String name, Object... args) throws Exception {
         for (Class<?> c = target.getClass(); c != null; c = c.getSuperclass()) {
             for (Method method : c.getDeclaredMethods()) {

@@ -39,7 +39,7 @@ final class DisplayHooks {
             @Override protected void afterHookedMethod(MethodHookParam m){if(!m.hasThrowable()&&isClone((Integer)m.args[0]))m.setResult(false);}
         });
         Class<?> packages=XposedHelpers.findClass("com.android.server.pm.PackageManagerService$IPackageManagerImpl",loader);
-        for(String method:new String[]{"getApplicationInfo","getActivityInfo"})XposedBridge.hookAllMethods(packages,method,new XC_MethodHook(){
+        for(String method:new String[]{"getApplicationInfo","getActivityInfo"})XposedBridge.hookAllMethods(Reflect.declaringClass(packages,method),method,new XC_MethodHook(){
             @Override protected void afterHookedMethod(MethodHookParam m)throws Throwable{
                 if(m.hasThrowable()||m.getResult()==null||!uiCaller())return;
                 Object value=m.getResult();ApplicationInfo info=value instanceof ActivityInfo?((ActivityInfo)value).applicationInfo:value instanceof ApplicationInfo?(ApplicationInfo)value:null;

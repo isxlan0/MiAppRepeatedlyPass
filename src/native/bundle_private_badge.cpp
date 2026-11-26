@@ -25,7 +25,8 @@ __attribute__((constructor)) static void intercept_internal_calls(){
     // Internal Rust calls use direct branches and bypass ELF symbol interposition.
     // These four pinned instructions contain no PC-relative operands; preserve PAC and stack setup.
     const uint8_t expected[]={0x3f,0x23,0x03,0xd5,0xff,0xc3,0x02,0xd1,0xfd,0x7b,0x07,0xa9,0xf7,0x43,0x00,0xf9};
-    if(std::memcmp(entry,expected,16)!=0){__android_log_print(ANDROID_LOG_ERROR,"MiAppNativeBadge","Rust entry mismatch");return;}
+    const uint8_t earlier[]={0x3f,0x23,0x03,0xd5,0xff,0x43,0x02,0xd1,0xfd,0x7b,0x06,0xa9,0xf6,0x57,0x07,0xa9};
+    if(std::memcmp(entry,expected,16)!=0&&std::memcmp(entry,earlier,16)!=0){__android_log_print(ANDROID_LOG_ERROR,"MiAppNativeBadge","Rust entry mismatch");return;}
     size_t pageSize=static_cast<size_t>(sysconf(_SC_PAGESIZE));
     auto trampoline=reinterpret_cast<uint8_t*>(mmap(nullptr,pageSize,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0));
     if(trampoline==MAP_FAILED)return;

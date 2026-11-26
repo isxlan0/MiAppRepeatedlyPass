@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include "native_layout.h"
 
 extern "C" bool Security_is_xspace_user_id(int32_t);
 using GetText=void(*)(uint64_t*,const char*,size_t,int32_t);
@@ -98,14 +99,14 @@ static bool branch(uintptr_t from,uintptr_t to,uint32_t* out){
 }
 
 bool miapp_install_runtime_titles(uintptr_t base){
-    uintptr_t call=base+0x8df8f4;
+    uintptr_t call=base+miapp_layout.titleCall;
     // Validate the exact get_text BL and the following load of Option<String>.
-    const uint32_t pinned[]={0x94091895,0xf85c03b4,0xb100069f,0x54000c40};
+    const auto& pinned=miapp_layout.titleExpected;
     if(std::memcmp(reinterpret_cast<void*>(call),pinned,sizeof(pinned))){
         __android_log_print(ANDROID_LOG_ERROR,"MiAppRuntimeTitles","Activity label bridge mismatch");return false;
     }
-    uintptr_t entry=base+0x9afe14;
-    const uint32_t entryPinned[]={0xd10103ff,0xa9017bfd,0xa90257f6,0xa9034ff4};
+    uintptr_t entry=base+miapp_layout.encode;
+    const auto& entryPinned=miapp_layout.encodeExpected;
     if(std::memcmp(reinterpret_cast<void*>(entry),entryPinned,sizeof(entryPinned)))return false;
     size_t size=sysconf(_SC_PAGESIZE);uintptr_t page=call&~(size-1);uint32_t* thunk=nullptr;
     for(uintptr_t distance=size;distance<0x07000000&&!thunk;distance+=size){
@@ -134,9 +135,9 @@ bool miapp_install_runtime_titles(uintptr_t base){
     if(mprotect(thunk,size,PROT_READ|PROT_EXEC)||mprotect(reinterpret_cast<void*>(page),size,PROT_READ|PROT_WRITE|PROT_EXEC)){
         munmap(thunk,size);return false;
     }
-    getText=reinterpret_cast<GetText>(base+0xb25b48);
-    getUser=reinterpret_cast<GetUser>(base+0xe039b0);
-    getId=reinterpret_cast<GetId>(base+0xe01df0);
+    getText=reinterpret_cast<GetText>(base+miapp_layout.getText);
+    getUser=reinterpret_cast<GetUser>(base+miapp_layout.getUser);
+    getId=reinterpret_cast<GetId>(base+miapp_layout.getId);
     encode=reinterpret_cast<Encode>(thunk+16);
     uintptr_t itemPage=entry&~(size-1);
     if(mprotect(reinterpret_cast<void*>(itemPage),size,PROT_READ|PROT_WRITE|PROT_EXEC)){

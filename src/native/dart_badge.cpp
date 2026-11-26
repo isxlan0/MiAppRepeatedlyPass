@@ -8,6 +8,11 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include "native_layout.h"
+
+// Writable file data so the installer can fill it without recompiling on-device.
+// ready remains zero in the distributed ZIP and is set only after full analysis.
+MiappLayout miapp_layout={{'M','I','A','P','P','_','L','A','Y','O','U','T','_','V','1','!'},1,0,{},{},{},0,0,0,0,0,0,0,{},{}};
 
 extern "C" bool Security_is_xspace_user_id(int32_t);
 extern "C" void miapp_dart_x1();
@@ -41,35 +46,43 @@ static void* nearby(uintptr_t base,size_t size){
     return nullptr;
 }
 
-// ZIP data offset and ELF load segments are pinned to the installed Runtime APK.
-// Android maps uncompressed APK libraries directly; there is no libapp.so path.
-static uintptr_t dart_base(){
+// Validate the complete executable segment before applying any patch. An OTA or
+// APK update after module installation must not reuse stale generated addresses.
+static uint64_t code_hash(uintptr_t start,size_t length){
+    uint64_t hash=0xcbf29ce484222325ULL;
+    const auto bytes=reinterpret_cast<const uint8_t*>(start);
+    for(size_t i=0;i<length;i++){hash^=bytes[i];hash*=0x100000001b3ULL;}
+    return hash;
+}
+static uintptr_t library_base(const MiappLibraryLayout& layout){
+    if(miapp_layout.version!=1||miapp_layout.ready!=1||!layout.codeSize||layout.codeSize>128*1024*1024)return 0;
     FILE* maps=std::fopen("/proc/self/maps","r");if(!maps)return 0;
-    char line[1024];uintptr_t base=0;int mapped=0;
+    char line[1024];uintptr_t base=0,covered=0;
     while(std::fgets(line,sizeof(line),maps)){
         unsigned long start=0,end=0,offset=0;char perms[5]={};
-        if(std::sscanf(line,"%lx-%lx %4s %lx",&start,&end,perms,&offset)==4&&
-           offset==0x528000&&perms[0]=='r'&&
-           std::strstr(line,"/product/priv-app/MiuiHome/MiuiHome.apk")){
-            base=start;
-        }
+        if(std::sscanf(line,"%lx-%lx %4s %lx",&start,&end,perms,&offset)!=4||
+           !std::strstr(line,"/product/priv-app/MiuiHome/MiuiHome.apk"))continue;
+        if(offset==layout.zipOffset&&perms[0]=='r')base=start;
         if(base&&perms[0]=='r'&&perms[2]=='x'){
-            const uintptr_t offsets[]={0x9c7bf8,0x9c7cc8,0xb1cd40,0xb18360,0xa4b114};
-            for(int i=0;i<5;i++)if(start<=base+offsets[i]&&end>=base+offsets[i]+20)mapped|=1<<i;
+            uintptr_t first=base+layout.codeAddress,last=first+layout.codeSize;
+            // Check file offsets as well as addresses: only this APK entry counts.
+            uintptr_t at=first+covered;
+            if(start<=at&&end>at&&offset+(at-start)==layout.zipOffset+layout.codeFileOffset+covered)
+                covered=(end<last?end:last)-first;
         }
     }
-    std::fclose(maps);return mapped==31?base:0;
+    std::fclose(maps);return covered==layout.codeSize?base:0;
 }
 
 static bool patch(uintptr_t base){
     struct Site{uintptr_t offset;uint32_t expected[5];void(*helper)();};
     const Site sites[]={
-        {0x9c7bf8,{0xf8473001,0xf10f9c3f,0x54000160,0xb84c3003,0x8b1c8063},miapp_dart_x1},
-        {0x9c7cc8,{0xf8473001,0xf10f9c3f,0x54000381,0xf85f03a3,0xb84c3002},miapp_dart_x1},
-        {0xb1cd40,{0xf8473022,0xf10f9c5f,0x910082d0,0x9100c2d1,0x9a910200},miapp_dart_x2},
+        {miapp_layout.badges[0],{0xf8473001,0xf10f9c3f,0x54000160,0xb84c3003,0x8b1c8063},miapp_dart_x1},
+        {miapp_layout.badges[1],{0xf8473001,0xf10f9c3f,0x54000381,0xf85f03a3,0xb84c3002},miapp_dart_x1},
+        {miapp_layout.badges[2],{0xf8473022,0xf10f9c5f,0x910082d0,0x9100c2d1,0x9a910200},miapp_dart_x2},
         // Inlined current-user/clone tests used to choose work-profile artwork.
-        {0xb18360,{0xf8473022,0xf10f9c5f,0x910082d0,0x9100c2d1,0x9a910201},miapp_dart_x2},
-        {0xa4b114,{0x540000e0,0xf10f9c3f,0x540000a0,0x910082c0,0xaa1d03ef},miapp_dart_x1}
+        {miapp_layout.badges[3],{0xf8473022,0xf10f9c5f,0x910082d0,0x9100c2d1,0x9a910201},miapp_dart_x2},
+        {miapp_layout.badges[4],{0x540000e0,0xf10f9c3f,0x540000a0,0x910082c0,0xaa1d03ef},miapp_dart_x1}
     };
     constexpr int siteCount=sizeof(sites)/sizeof(sites[0]);
     // Validate every full instruction sequence before changing any code.
@@ -130,14 +143,14 @@ static bool patch(uintptr_t base){
 static bool prefer_clone_labels(uintptr_t base){
     // _resolveActivityLabel first tries owner resources, then LauncherApps(user).
     // Fixed clones must use the second path to retain their real user identity.
-    uintptr_t entry=base+0x1951728;const uint32_t expected=0xaa0003e3;
+    uintptr_t entry=base+miapp_layout.labelEntry;const uint32_t expected=0xaa0003e3;
     if(std::memcmp(reinterpret_cast<void*>(entry),&expected,4))return false;
     size_t size=sysconf(_SC_PAGESIZE);auto code=static_cast<uint32_t*>(nearby(entry,size));if(!code)return false;
     const uint32_t ops[]={0xa9bf45f0,0xf85303b0,0xb841b210,0x7200021f,0x54000101,
                          0x13017e10,0x510f9610,0x71000a1f,0x54000088,
                          0xa8c145f0,0xaa1603e0,0,0xa8c145f0,0xaa0003e3,0};
     std::memcpy(code,ops,sizeof(ops));uint32_t redirect;
-    if(!branch(reinterpret_cast<uintptr_t>(code+11),base+0x19517d8,code+11)||
+    if(!branch(reinterpret_cast<uintptr_t>(code+11),base+miapp_layout.labelTarget,code+11)||
        !branch(reinterpret_cast<uintptr_t>(code+14),entry+4,code+14)||
        !branch(entry,reinterpret_cast<uintptr_t>(code),&redirect)){munmap(code,size);return false;}
     __builtin___clear_cache(reinterpret_cast<char*>(code),reinterpret_cast<char*>(code)+sizeof(ops));
@@ -152,27 +165,19 @@ static bool prefer_clone_labels(uintptr_t base){
 }
 
 static void* install(void*){
-    bool badges=false,titles=false;
+    if(miapp_layout.ready!=1){__android_log_print(ANDROID_LOG_ERROR,"MiAppDartBadge","Install-time layout missing");return nullptr;}
     for(int attempt=0;attempt<600;attempt++){
-        uintptr_t base=dart_base();
-        if(base&&!badges){patch(base);prefer_clone_labels(base);badges=true;}
-        if(!titles){
-            FILE* maps=std::fopen("/proc/self/maps","r");char line[1024];uintptr_t native=0;
-            if(maps){
-                while(std::fgets(line,sizeof(line),maps)){
-                    unsigned long start=0,end=0,offset=0;char perms[5]={};
-                    if(std::sscanf(line,"%lx-%lx %4s %lx",&start,&end,perms,&offset)==4&&
-                       std::strstr(line,"/product/priv-app/MiuiHome/MiuiHome.apk")){
-                        if(offset==0x21c4000&&perms[0]=='r')native=start;
-                        if(native&&perms[0]=='r'&&perms[2]=='x'&&start<=native+0x8df8f4&&end>=native+0x9afe14+16){
-                            miapp_install_runtime_titles(native);titles=true;break;
-                        }
-                    }
-                }
-                std::fclose(maps);
+        uintptr_t base=library_base(miapp_layout.dart),native=library_base(miapp_layout.native);
+        if(base&&native){
+            if(code_hash(base+miapp_layout.dart.codeAddress,miapp_layout.dart.codeSize)!=miapp_layout.dart.codeHash){
+                __android_log_print(ANDROID_LOG_ERROR,"MiAppDartBadge","Launcher changed after installation; reinstall module");return nullptr;
             }
+            if(code_hash(native+miapp_layout.native.codeAddress,miapp_layout.native.codeSize)!=miapp_layout.native.codeHash){
+                __android_log_print(ANDROID_LOG_ERROR,"MiAppRuntimeTitles","Launcher changed after installation; reinstall module");return nullptr;
+            }
+            if(!patch(base)||!prefer_clone_labels(base)||!miapp_install_runtime_titles(native))return nullptr;
+            return nullptr;
         }
-        if(badges&&titles)return nullptr;
         usleep(100000);
     }
     __android_log_print(ANDROID_LOG_ERROR,"MiAppDartBadge","Runtime AOT mapping not found");return nullptr;

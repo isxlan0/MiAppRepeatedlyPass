@@ -81,6 +81,9 @@ def main():
     with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
         for path in sorted((ROOT/'module').rglob('*')):
             if not path.is_file():continue
+            # Originals are extracted from the target ROM at install time. The
+            # Ignore leftovers from older checkouts as well as local install tests.
+            if path.name in ('libmiapp_security_original.so','libmiapp_bundle_original.so','libmiapp_bundle_private_orig.so'):continue
             data=path.read_bytes()
             if path.suffix in ('.sh','.prop','.md') or path.name=='miapp':data=data.replace(b'\r\n',b'\n')
             info=zipfile.ZipInfo(path.relative_to(ROOT/'module').as_posix());info.compress_type=zipfile.ZIP_DEFLATED

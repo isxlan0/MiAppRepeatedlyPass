@@ -73,14 +73,24 @@ final class DexModel {
         final Map<String,Cls> classes=new LinkedHashMap<>();final Map<String,Method> methods=new LinkedHashMap<>();final Map<String,Field> fields=new LinkedHashMap<>();
         final ResourceTable resources;final File file;
         Archive(){resources=new ResourceTable();file=null;}
-        Archive(File file)throws Exception {
-            this.file=file;ResourceTable table=null;int total=0,dexCount=0;Set<String> names=new HashSet<>();
+        Archive(File file)throws Exception {this(Collections.singletonList(file));}
+        Archive(List<File> files)throws Exception {
+            need(!files.isEmpty(),"Missing APK inputs");this.file=files.get(0);ResourceTable table=new ResourceTable();int total=0,dexCount=0;
+            for(File file:files){Set<String> names=new HashSet<>();
             try(ZipFile zip=new ZipFile(file)){Enumeration<? extends ZipEntry> entries=zip.entries();while(entries.hasMoreElements()){
                 ZipEntry e=entries.nextElement();if(!e.getName().matches(DEX_NAME)&&!e.getName().equals("resources.arsc"))continue;
                 need(names.add(e.getName()),"Duplicate DEX/resource entry");byte[] data;try(InputStream in=zip.getInputStream(e)){data=bytes(in,64*1024*1024);}total+=data.length;need(total<256*1024*1024,"Archive DEX budget exceeded");
-                if(e.getName().equals("resources.arsc")){table=new ResourceTable(data);continue;}dexCount++;
+                if(e.getName().equals("resources.arsc")){
+                    ResourceTable part=new ResourceTable(data);
+                    for(Map.Entry<Integer,String> item:part.names.entrySet()){
+                        String old=table.names.put(item.getKey(),item.getValue());need(old==null||old.equals(item.getValue()),"Conflicting split resource ID");
+                    }
+                    for(Map.Entry<String,Integer> item:part.ids.entrySet()){
+                        Integer old=table.ids.put(item.getKey(),item.getValue());need(old==null||old.equals(item.getValue()),"Conflicting split resource name");
+                    }continue;
+                }dexCount++;
                 for(Cls c:new Dex(data).classes){need(classes.put(c.name,c)==null,"Duplicate DEX class: "+c.name);for(Method m:c.methods)methods.put(m.id(),m);for(Field f:c.fields)fields.put(f.id(),f);}
-            }}need(dexCount>0,"No standard DEX in "+file);resources=table==null?new ResourceTable():table;
+            }}}need(dexCount>0,"No standard DEX in "+file);resources=table;
         }
         String normalizedType(String text,boolean obfuscated){
             if(!obfuscated)return text;StringBuilder s=new StringBuilder();for(int i=0;i<text.length();){

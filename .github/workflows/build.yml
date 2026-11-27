@@ -59,21 +59,16 @@ jobs:
           & $sdkManager 'build-tools;37.0.0' 'platforms;android-37.0' 'ndk;30.0.16248370'
           if ($LASTEXITCODE -ne 0) { throw 'Android SDK installation failed.' }
           "ANDROID_SDK_ROOT=$sdkPath" >> $env:GITHUB_ENV
-      - name: Download Xposed API 82
-        run: |
-          $apiPath = Join-Path $env:RUNNER_TEMP 'xposed-api-82.jar'
-          Invoke-WebRequest -Uri 'https://api.xposed.info/de/robv/android/xposed/api/82/api-82.jar' -OutFile $apiPath
-          $expectedHash = 'f48c635f1c7469fdec0e00ad2ea0b7a6b2f5b55065784a35b7ca3a84615e8e25'
-          if ((Get-FileHash -LiteralPath $apiPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
-            throw 'Xposed API checksum mismatch.'
-          }
-          "XPOSED_API_JAR=$apiPath" >> $env:GITHUB_ENV
+      - name: Download and verify libxposed API 102 dependencies
+        run: python prepare_dependencies.py
       - name: Build and verify package
         env:
           MIAPP_SIGNING_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
         run: |
           python build.py
           if ($LASTEXITCODE -ne 0) { throw 'Module build failed.' }
+          python ci/check_modern.py
+          if ($LASTEXITCODE -ne 0) { throw 'API 102 behavior regression failed.' }
           python ci/verify_package.py
           if ($LASTEXITCODE -ne 0) { throw 'Package verification failed.' }
       - name: Upload installable ZIP

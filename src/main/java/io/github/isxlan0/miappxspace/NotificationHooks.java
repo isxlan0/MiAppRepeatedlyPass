@@ -5,7 +5,7 @@ import android.content.*;
 import android.content.pm.ApplicationInfo;
 import android.os.Bundle;
 import android.os.UserHandle;
-import de.robv.android.xposed.*;
+
 import java.lang.reflect.Method;
 
 final class NotificationHooks {
@@ -27,15 +27,15 @@ final class NotificationHooks {
         return app.uid;
     }
 
-    static void install(ClassLoader loader){
-        Class<?> page=XposedHelpers.findClass("com.android.settings.notification.BaseNotificationSettings",loader);
-        Class<?> helper=XposedHelpers.findClass("miui.util.NotificationFilterHelper",loader);
-        Method create=XposedHelpers.findMethodExact(page,"onCreate",Bundle.class);
-        Method associated=XposedHelpers.findMethodExact(helper,"resolveAssociatedUid",Context.class,UserHandle.class,String.class,boolean.class);
-        Method enable=XposedHelpers.findMethodExact(helper,"enableNotifications",Context.class,String.class,boolean.class);
-        final Method perUid=XposedHelpers.findMethodExact(helper,"enableNotifications",Context.class,String.class,int.class,boolean.class);
-        XposedBridge.hookMethod(create,new XC_MethodHook(){
-                @Override protected void beforeHookedMethod(MethodHookParam m)throws Throwable{
+    static void install(ClassLoader loader)throws Exception{
+        Class<?> page=HookReflect.findClass("com.android.settings.notification.BaseNotificationSettings",loader);
+        Class<?> helper=HookReflect.findClass("miui.util.NotificationFilterHelper",loader);
+        Method create=HookReflect.findMethodExact(page,"onCreate",Bundle.class);
+        Method associated=HookReflect.findMethodExact(helper,"resolveAssociatedUid",Context.class,UserHandle.class,String.class,boolean.class);
+        Method enable=HookReflect.findMethodExact(helper,"enableNotifications",Context.class,String.class,boolean.class);
+        final Method perUid=HookReflect.findMethodExact(helper,"enableNotifications",Context.class,String.class,int.class,boolean.class);
+        Hooks.hookMethod(create,new HookCallback(){
+                @Override protected void beforeHookedMethod(Param m)throws Throwable{
                     Activity activity=(Activity)Reflect.call(m.thisObject,"getActivity");
                     if(activity==null)return;
                     Intent intent=activity.getIntent();if(intent==null)return;
@@ -57,11 +57,11 @@ final class NotificationHooks {
                 }
             });
         // Keep the ROM's enterprise/forced-notification checks, but suppress its owner/999 mirroring.
-        XposedBridge.hookMethod(associated,new XC_MethodHook(){
-            @Override protected void beforeHookedMethod(MethodHookParam m){if(Boolean.TRUE.equals(singleInstance.get()))m.setResult(null);}
+        Hooks.hookMethod(associated,new HookCallback(){
+            @Override protected void beforeHookedMethod(Param m){if(Boolean.TRUE.equals(singleInstance.get()))m.setResult(null);}
         });
-        XposedBridge.hookMethod(enable,new XC_MethodHook(){
-            @Override protected void beforeHookedMethod(MethodHookParam m){
+        Hooks.hookMethod(enable,new HookCallback(){
+            @Override protected void beforeHookedMethod(Param m){
                 Context context=(Context)m.args[0];Activity activity=activity(context);
                 if(activity==null)return;
                 Intent intent=activity.getIntent();if(intent==null)return;

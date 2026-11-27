@@ -5,7 +5,7 @@ import android.content.*;
 import android.os.Bundle;
 import java.lang.reflect.*;
 import java.util.*;
-import de.robv.android.xposed.*;
+
 
 /** Builds on SecurityCore's own activity, MIUI preference cells and dropdowns. */
 final class NativePages {
@@ -16,14 +16,14 @@ final class NativePages {
         context.startActivity(intent);
     }
     static void install(ClassLoader loader){
-        XposedBridge.hookMethod(JavaBindings.method("ui.detail.create"),new XC_MethodHook(){
-            @Override protected void afterHookedMethod(MethodHookParam m)throws Throwable{if(!m.hasThrowable())setup(m.thisObject);}
+        Hooks.hookMethod(JavaBindings.method("ui.detail.create"),new HookCallback(){
+            @Override protected void afterHookedMethod(Param m)throws Throwable{if(!m.hasThrowable())setup(m.thisObject);}
         });
-        XposedBridge.hookMethod(JavaBindings.method("ui.detail.resume"),new XC_MethodHook(){
-            @Override protected void afterHookedMethod(MethodHookParam m)throws Throwable{if(XposedHelpers.getAdditionalInstanceField(m.thisObject,"miapp.page")!=null)refresh(m.thisObject);}
+        Hooks.hookMethod(JavaBindings.method("ui.detail.resume"),new HookCallback(){
+            @Override protected void afterHookedMethod(Param m)throws Throwable{if(HookReflect.getAdditionalInstanceField(m.thisObject,"miapp.page")!=null)refresh(m.thisObject);}
         });
-        XposedBridge.hookMethod(JavaBindings.method("contract.detail.activity"),new XC_MethodHook(){
-            @Override protected void afterHookedMethod(MethodHookParam m){
+        Hooks.hookMethod(JavaBindings.method("contract.detail.activity"),new HookCallback(){
+            @Override protected void afterHookedMethod(Param m){
                 Activity activity=(Activity)m.thisObject;int id=activity.getIntent().getIntExtra(USER,-1);
                 if(id>=0){android.widget.TextView title=(android.widget.TextView)activity.findViewById(JavaBindings.resource("id/name"));if(title!=null)title.setText(CloneSlots.label(title.getText(),id));}
                 if(activity.getIntent().hasExtra(STOCK))try{
@@ -36,7 +36,7 @@ final class NativePages {
         });
     }
     static Object pref(Context c,String type,String key,String title)throws Exception{
-        Class<?> cls=XposedHelpers.findClass(type,c.getClassLoader());Object value;
+        Class<?> cls=HookReflect.findClass(type,c.getClassLoader());Object value;
         try{value=cls.getConstructor(Context.class).newInstance(c);}
         catch(NoSuchMethodException missing){value=cls.getConstructor(Context.class,android.util.AttributeSet.class).newInstance(c,null);}
         Reflect.call(value,"setKey",key);Reflect.call(value,"setTitle",title);Reflect.call(value,"setPersistent",false);return value;
@@ -67,11 +67,11 @@ final class NativePages {
         }
         Object category=pref(c,"miuix.preference.PreferenceCategory","miapp.instances",selected<0?"应用分身":"分身管理");
         Reflect.call(category,"setOrder",10);JavaBindings.call("pref.add",screen,category);
-        XposedHelpers.setAdditionalInstanceField(fragment,"miapp.page",category);
+        HookReflect.setAdditionalInstanceField(fragment,"miapp.page",category);
         if(selected<0){
             Object note=pref(c,"miuix.preference.PreferenceCategory","miapp.limit","最多创建 3 个分身(系统提供1个+模块额外提供2个)");Reflect.call(note,"setOrder",11);JavaBindings.call("pref.add",screen,note);
             Object defaults=pref(c,"miuix.preference.DropDownPreference","miapp.default","默认打开应用");
-            JavaBindings.call("pref.add",personal,defaults);XposedHelpers.setAdditionalInstanceField(fragment,"miapp.default",defaults);
+            JavaBindings.call("pref.add",personal,defaults);HookReflect.setAdditionalInstanceField(fragment,"miapp.default",defaults);
             // Preserve WeChat/QQ's native payment/login/share rows; unknown apps use a general default row.
             for(String field:new String[]{"d","e","f"}){
                 Object row=JavaBindings.get("detail."+field,fragment);String key=(String)Reflect.call(row,"getKey");
@@ -94,8 +94,8 @@ final class NativePages {
         listener(row,"setOnPreferenceChangeListener",value->{
             int user=Integer.parseInt(value.toString());
             if(user<0)prefs.edit().remove(savedKey).apply();else prefs.edit().putInt(savedKey,user).apply();
-            Class<?> settings=XposedHelpers.findClass("android.provider.MiuiSettings$XSpace",c.getClassLoader());
-            XposedHelpers.callStaticMethod(settings,"setAskType",c,resolverKey,user==0?1:user==999?2:0);
+            Class<?> settings=HookReflect.findClass("android.provider.MiuiSettings$XSpace",c.getClassLoader());
+            HookReflect.callStaticMethod(settings,"setAskType",c,resolverKey,user==0?1:user==999?2:0);
             return true;
         });
     }
@@ -105,7 +105,7 @@ final class NativePages {
         String pkg=activity.getIntent().getStringExtra("package_name");int selected=activity.getIntent().getIntExtra(USER,-1);
         int[] ids=ProfileRpc.call("instances",pkg,-1).getIntArray("ids");
         CharSequence label=c.getPackageManager().getApplicationLabel(c.getPackageManager().getApplicationInfo(pkg,0));
-        Object category=XposedHelpers.getAdditionalInstanceField(fragment,"miapp.page");JavaBindings.call("pref.clear",category);
+        Object category=HookReflect.getAdditionalInstanceField(fragment,"miapp.page");JavaBindings.call("pref.clear",category);
         if(selected>=0){
             Object start=pref(c,"miuix.preference.TextPreference","miapp.start","启动 "+CloneSlots.label(label,selected));JavaBindings.call("pref.add",category,start);
             listener(start,"setOnPreferenceClickListener",value->{SecurityUi.start(c,pkg,selected);return true;});
@@ -144,11 +144,11 @@ final class NativePages {
             Reflect.call(row,"setSummary","旧版本分身，可进入清理");JavaBindings.call("pref.add",category,row);listener(row,"setOnPreferenceClickListener",value->{open(c,pkg,id);return true;});
         }
         Object personal=Reflect.call(fragment,"findPreference","xspace_setting");Reflect.call(personal,"setEnabled",ids.length>1);
-        Object defaults=XposedHelpers.getAdditionalInstanceField(fragment,"miapp.default");dropdown(fragment,defaults,"*",ids,label);
-        Class<?> settings=XposedHelpers.findClass("android.provider.MiuiSettings$XSpace",c.getClassLoader());
+        Object defaults=HookReflect.getAdditionalInstanceField(fragment,"miapp.default");dropdown(fragment,defaults,"*",ids,label);
+        Class<?> settings=HookReflect.findClass("android.provider.MiuiSettings$XSpace",c.getClassLoader());
         for(String field:new String[]{"d","e","f"}){
             Object row=JavaBindings.get("detail."+field,fragment);String key=(String)Reflect.call(row,"getKey");
-            String resolverKey=(String)XposedHelpers.callStaticMethod(settings,"getSettingAppType",key);
+            String resolverKey=(String)HookReflect.callStaticMethod(settings,"getSettingAppType",key);
             if(!resolverKey.isEmpty())dropdown(fragment,row,resolverKey,ids,label);
         }
         Object checkbox=Reflect.call(fragment,"findPreference","checkbox");Reflect.call(checkbox,"setChecked",CloneSlots.contains(ids,999));

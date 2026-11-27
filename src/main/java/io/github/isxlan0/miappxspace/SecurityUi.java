@@ -6,21 +6,21 @@ import android.os.*;
 import android.view.*;
 import android.widget.*;
 import java.util.*;
-import de.robv.android.xposed.*;
+
 
 /** Extends the ROM's existing SecurityCore screens and MIUI resolver dialog. */
 final class SecurityUi {
     static final String SETTING="com.miui.xspace.ui.activity.XSpaceSettingActivity";
     static void install(ClassLoader loader)throws Throwable{
         // The stock service must never adopt an extra CLONE when 999 is absent.
-        XposedBridge.hookMethod(JavaBindings.method("stock.user"),new XC_MethodHook(){
-            @Override protected void beforeHookedMethod(MethodHookParam m)throws Throwable{
+        Hooks.hookMethod(JavaBindings.method("stock.user"),new HookCallback(){
+            @Override protected void beforeHookedMethod(Param m)throws Throwable{
                 if(m.args.length==1&&m.args[0] instanceof UserManager)m.setResult(Reflect.call(m.args[0],"getUserInfo",999));
             }
         });
         AccountResetUi.install(loader);
-        XposedBridge.hookMethod(JavaBindings.method("stock.change"),new XC_MethodHook(){
-            @Override protected void beforeHookedMethod(MethodHookParam m)throws Throwable{
+        Hooks.hookMethod(JavaBindings.method("stock.change"),new HookCallback(){
+            @Override protected void beforeHookedMethod(Param m)throws Throwable{
                 if(m.args.length!=3||!(m.args[1] instanceof String)||!(m.args[2] instanceof Boolean))return;
                 String pkg=(String)m.args[1];boolean enable=(Boolean)m.args[2];
                 int[] ids=ProfileRpc.call("instances",pkg,-1).getIntArray("ids");
@@ -31,8 +31,8 @@ final class SecurityUi {
                 }
             }
         });
-        XposedBridge.hookMethod(JavaBindings.method("ui.bind"),new XC_MethodHook(){
-            @Override protected void afterHookedMethod(MethodHookParam m)throws Throwable{
+        Hooks.hookMethod(JavaBindings.method("ui.bind"),new HookCallback(){
+            @Override protected void afterHookedMethod(Param m)throws Throwable{
                 if(m.args.length!=2||!(m.args[1] instanceof Integer))return;
                 List<?> data=(List<?>)JavaBindings.get("ui.data",m.thisObject);
                 int position=(Integer)m.args[1];if(position<0||position>=data.size())return;
@@ -50,8 +50,8 @@ final class SecurityUi {
             }
         });
         NativePages.install(loader);
-        XposedBridge.hookMethod(JavaBindings.method("ui.resolve"),new XC_MethodHook(){
-            @Override protected void beforeHookedMethod(MethodHookParam m)throws Throwable{
+        Hooks.hookMethod(JavaBindings.method("ui.resolve"),new HookCallback(){
+            @Override protected void beforeHookedMethod(Param m)throws Throwable{
                 Intent outer=(Intent)JavaBindings.get("resolver.outer",m.thisObject);
                 String pkg=outer.getStringExtra("android.intent.extra.xspace_resolver_activity_aim_package");
                 if(pkg==null)return;
@@ -89,7 +89,7 @@ final class SecurityUi {
                 if(launch==null)throw new IllegalStateException("应用没有启动入口");
                 launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);launch.putExtra("android.intent.extra.xspace_userid_selected",true);
                 launch.putExtra("android.intent.extra.picked_user_id",id);
-                Reflect.call(c,"startActivityAsUser",launch,XposedHelpers.newInstance(UserHandle.class,id));
+                Reflect.call(c,"startActivityAsUser",launch,HookReflect.newInstance(UserHandle.class,id));
             }catch(Exception e){message(c,e);}
         });
     }
@@ -109,8 +109,8 @@ final class SecurityUi {
         final String savedKey=pkg+"|"+key;
         SharedPreferences prefs=context.getSharedPreferences("miapp_xspace_defaults",0);
         int saved=prefs.getInt(savedKey,prefs.getInt(pkg+"|*",-1));
-        Class<?> settings=XposedHelpers.findClass("android.provider.MiuiSettings$XSpace",context.getClassLoader());
-        if(saved<0){int ask=(Integer)XposedHelpers.callStaticMethod(settings,"getAskType",context,key);if(ask==1)saved=0;else if(ask==2)saved=999;}
+        Class<?> settings=HookReflect.findClass("android.provider.MiuiSettings$XSpace",context.getClassLoader());
+        if(saved<0){int ask=(Integer)HookReflect.callStaticMethod(settings,"getAskType",context,key);if(ask==1)saved=0;else if(ask==2)saved=999;}
         for(int id:ids)if(id==saved){launch(runner,original,outer,id);return;}
         if(saved>=0)prefs.edit().remove(savedKey).apply();
         Object builder=JavaBindings.get("resolver.builder",runner);
@@ -123,7 +123,7 @@ final class SecurityUi {
             LinearLayout row=new LinearLayout(context);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(context,8),dp(context,12),dp(context,8),dp(context,12));
             ImageView image=new ImageView(context);
             android.graphics.drawable.Drawable fresh=context.getPackageManager().getApplicationIcon(pkg);
-            image.setImageDrawable(id==0?fresh:context.getPackageManager().getUserBadgedIcon(fresh,(UserHandle)XposedHelpers.newInstance(UserHandle.class,id)));
+            image.setImageDrawable(id==0?fresh:context.getPackageManager().getUserBadgedIcon(fresh,(UserHandle)HookReflect.newInstance(UserHandle.class,id)));
             row.addView(image,new LinearLayout.LayoutParams(dp(context,48),dp(context,48)));
             TextView text=new TextView(context);text.setText(CloneSlots.label(label,id));text.setTextSize(17);text.setPadding(dp(context,16),0,0,0);row.addView(text);
             row.setContentDescription(label+"，"+name(id));row.setOnClickListener(v->{
@@ -138,8 +138,8 @@ final class SecurityUi {
         JavaBindings.call("dialog.cancel",builder,android.R.string.cancel,(DialogInterface.OnClickListener)(d,n)->activity.finish());
     }
     static void launch(Object runner,Intent original,Intent outer,int id)throws Exception{
-        Class<?> compat=XposedHelpers.findClass("miui.securityspace.XSpaceIntentCompat",runner.getClass().getClassLoader());
-        XposedHelpers.callStaticMethod(compat,"prepareToLeaveUser",original,outer.getIntExtra("io.github.isxlan0.miappxspace.source_user",0));
+        Class<?> compat=HookReflect.findClass("miui.securityspace.XSpaceIntentCompat",runner.getClass().getClassLoader());
+        HookReflect.callStaticMethod(compat,"prepareToLeaveUser",original,outer.getIntExtra("io.github.isxlan0.miappxspace.source_user",0));
         original.putExtra("android.intent.extra.xspace_userid_selected",true);
         original.putExtra("android.intent.extra.picked_user_id",id);
         android.util.Log.i(ProfileHook.TAG,"Selected package="+original.getComponent()+" actualUser="+id+" displayNumber="+(id==0?1:1001-id));

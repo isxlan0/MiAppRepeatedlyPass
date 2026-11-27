@@ -2,6 +2,7 @@
 MODDIR=${0%/*}
 exec 9> "$MODDIR/service.lock"
 /system/bin/flock -n 9 9>&9 || exit 0
+. "$MODDIR/status-description.sh"
 until [ "$(/system/bin/getprop sys.boot_completed)" = 1 ]; do sleep 2; done
 "$MODDIR/bin/miapp" status > "$MODDIR/status.log" 2>&1
 "$MODDIR/bin/miapp" boot-spaces > "$MODDIR/boot-spaces.log" 2>&1
@@ -10,6 +11,9 @@ until [ "$(/system/bin/getprop sys.boot_completed)" = 1 ]; do sleep 2; done
 last_labels=
 last_state=
 while [ -d "$MODDIR" ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ]; do
+  if ! /system/bin/timeout -k 2 12 "$MODDIR/bin/miapp" health "$MODDIR" > "$MODDIR/health.log" 2>&1; then
+    miapp_description "状态检查失败或超时：查看 health.log"
+  fi
   current_labels="$(stat -c '%Y:%i:%s' /data/system/packages.xml 2>/dev/null):$(getprop persist.sys.locale)"
   if [ "$current_labels" != "$last_labels" ]; then
     if "$MODDIR/bin/miapp" refresh-titles > "$MODDIR/titles.log" 2>&1; then
@@ -25,3 +29,4 @@ while [ -d "$MODDIR" ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" 
   fi
   sleep 15
 done
+if [ -d "$MODDIR" ]; then miapp_description "已禁用/待卸载：重启后生效"; fi

@@ -27,7 +27,6 @@ final class Control {
         if (!marker.isFile()) return false;
         Properties p = new Properties();
         try(FileInputStream in=new FileInputStream(marker)){p.load(in);}
-        String pid = p.getProperty("pid", "");
-        return pid.matches("[0-9]+") && Arrays.asList(run("/system/bin/pidof","system_server").split(" ")).contains(pid);
+        return "ready".equals(p.getProperty("state")) && BuildConfig.BUILD_ID.equals(p.getProperty("build")) && ModuleHealth.live(p,HealthFiles.bootId());
     }
 }

@@ -4,7 +4,7 @@ import android.content.Context;
 import android.content.pm.*;
 import android.os.Process;
 import android.util.SparseArray;
-import de.robv.android.xposed.*;
+
 import java.io.*;
 import java.lang.reflect.*;
 import java.util.*;
@@ -14,12 +14,19 @@ final class ManagementHooks {
     static final class Bindings {
         final Map<String,AccessibleObject> members=new HashMap<>();
         Bindings(String apk,ClassLoader loader)throws Exception{
+            this(Collections.singletonList(new File(apk)),null,loader);
+        }
+        Bindings(ApplicationInfo app,ClassLoader loader)throws Exception{
+            this(JavaBindings.apks(app),JavaBindings.cache(app,"management"),loader);
+        }
+        Bindings(List<File> apks,File cache,ClassLoader loader)throws Exception{
             Properties patterns=new Properties();
             try(InputStream in=ManagementHooks.class.getClassLoader().getResourceAsStream("assets/management-patterns.properties")){
                 if(in==null)throw new IOException("Missing management patterns");patterns.load(in);
             }
-            Properties found=JavaPrepare.security(new DexModel.Archive(new File(apk)),patterns);
-            for(String key:found.stringPropertyNames())members.put(key,JavaBindings.resolve(found.getProperty(key),loader));
+            BindingCache.resolve(apks,patterns,cache,JavaBindings.runtime(),found->{
+                members.clear();for(String key:found.stringPropertyNames())members.put(key,JavaBindings.resolve(found.getProperty(key),loader));
+            });
         }
         Method method(String key){return (Method)members.get(key);}
         Object get(String key,Object target)throws Exception{return ((Field)members.get(key)).get(target);}
@@ -72,12 +79,12 @@ final class ManagementHooks {
         }
     }
 
-    static void install(String apk,ClassLoader loader)throws Exception{
+    static void install(ApplicationInfo app,ClassLoader loader)throws Exception{
         if(Process.myUid()/100000!=0)return;
         // Resolve the whole graph before installing any partial app-list changes.
-        Bindings bindings=new Bindings(apk,loader);
-        XposedBridge.hookMethod(bindings.method("packages"),new XC_MethodHook(){
-            @Override protected void afterHookedMethod(MethodHookParam m)throws Throwable{
+        Bindings bindings=new Bindings(app,loader);
+        Hooks.hookMethod(bindings.method("packages"),new HookCallback(){
+            @Override protected void afterHookedMethod(Param m)throws Throwable{
                 if(m.hasThrowable()||!(m.getResult() instanceof List))return;
                 int[] extra=ProfileRpc.call("spaces",null,-1).getIntArray("ids");
                 if(extra==null)throw new IllegalStateException("Missing registered profile list");
@@ -85,13 +92,13 @@ final class ManagementHooks {
                 m.setResult(packages((List<?>)m.getResult(),(PackageManager)m.args[0],users));
             }
         });
-        XposedBridge.hookMethod(bindings.method("load"),new XC_MethodHook(){
-            @Override protected void afterHookedMethod(MethodHookParam m)throws Throwable{
+        Hooks.hookMethod(bindings.method("load"),new HookCallback(){
+            @Override protected void afterHookedMethod(Param m)throws Throwable{
                 if(m.hasThrowable()||m.getResult()==null)return;
                 moveClones(bindings,m.getResult(),"work.visible","personal.visible");
                 moveClones(bindings,m.getResult(),"work.all","personal.all");
             }
         });
-        XposedBridge.log(ProfileHook.TAG+": app management list/search hooks ready");
+        Hooks.log(ProfileHook.TAG+": app management list/search hooks ready");
     }
 }

@@ -3,14 +3,14 @@ package io.github.isxlan0.miappxspace;
 import android.content.*;
 import android.content.pm.ActivityInfo;
 import android.os.Binder;
-import de.robv.android.xposed.*;
+
 import java.util.*;
 
 final class ProfileRouting {
-    static boolean listed(Class<?> c,String field,String value){
-        Object set=XposedHelpers.getStaticObjectField(c,field);return set instanceof Collection&&((Collection<?>)set).contains(value);
+    static boolean listed(Class<?> c,String field,String value)throws Exception{
+        Object set=HookReflect.getStaticObjectField(c,field);return set instanceof Collection&&((Collection<?>)set).contains(value);
     }
-    static void check(XC_MethodHook.MethodHookParam m)throws Throwable{
+    static void check(HookCallback.Param m)throws Throwable{
         Intent intent=(Intent)m.args[2];ActivityInfo info=(ActivityInfo)m.args[1];
         int target=(Integer)m.args[5],caller=(Integer)m.args[7];String calling=(String)m.args[6];
         boolean targetExtra=ProfileHook.extra(target),callerExtra=ProfileHook.extra(caller);
@@ -29,8 +29,8 @@ final class ProfileRouting {
         if(intent.hasExtra("android.intent.extra.xspace_userid_selected")){
             if(targetExtra||callerExtra){
                 intent.removeExtra("android.intent.extra.xspace_resolve_intent_again");
-                Class<?> compat=XposedHelpers.findClass("miui.securityspace.XSpaceIntentCompat",m.thisObject.getClass().getClassLoader());
-                XposedHelpers.callStaticMethod(compat,"prepareToLeaveUser",intent,caller);
+                Class<?> compat=HookReflect.findClass("miui.securityspace.XSpaceIntentCompat",m.thisObject.getClass().getClassLoader());
+                HookReflect.callStaticMethod(compat,"prepareToLeaveUser",intent,caller);
                 Reflect.call(m.thisObject,"putCachedCallingRelation",pkg,calling,caller);m.setResult(intent);
             }
             return;
@@ -54,8 +54,8 @@ final class ProfileRouting {
             m.setResult(resolver);return;
         }
         if(callerExtra&&ids.length==1&&ids[0]==0){
-            Class<?> compat=XposedHelpers.findClass("miui.securityspace.XSpaceIntentCompat",manager.getClassLoader());
-            XposedHelpers.callStaticMethod(compat,"prepareToLeaveUser",intent,caller);
+            Class<?> compat=HookReflect.findClass("miui.securityspace.XSpaceIntentCompat",manager.getClassLoader());
+            HookReflect.callStaticMethod(compat,"prepareToLeaveUser",intent,caller);
             intent.putExtra("android.intent.extra.xspace_cached_uid",0);intent.putExtra("calling_relation",true);m.setResult(intent);
         }else if(targetExtra||callerExtra)m.setResult(intent);
     }

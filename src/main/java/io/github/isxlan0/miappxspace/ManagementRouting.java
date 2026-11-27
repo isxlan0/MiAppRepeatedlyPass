@@ -3,7 +3,7 @@ package io.github.isxlan0.miappxspace;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.os.Binder;
-import de.robv.android.xposed.*;
+
 import java.util.Properties;
 
 /** Normalize management launches before resolving an activity in a clone with no settings APK. */
@@ -24,20 +24,20 @@ final class ManagementRouting {
         return ManagementIntent.withIdentity(intent,user,app.uid);
     }
 
-    static void install(ClassLoader loader){
-        Class<?> supervisor=XposedHelpers.findClass("com.android.server.wm.ActivityTaskSupervisor",loader);
-        XposedHelpers.findAndHookMethod("com.android.server.wm.ActivityStarter$Request",loader,
-            "resolveActivity",supervisor,new XC_MethodHook(){
-                @Override protected void beforeHookedMethod(MethodHookParam m){
-                    Intent intent=(Intent)XposedHelpers.getObjectField(m.thisObject,"intent");
-                    String caller=(String)XposedHelpers.getObjectField(m.thisObject,"callingPackage");
+    static void install(ClassLoader loader)throws Exception{
+        Class<?> supervisor=HookReflect.findClass("com.android.server.wm.ActivityTaskSupervisor",loader);
+        HookReflect.findAndHookMethod("com.android.server.wm.ActivityStarter$Request",loader,
+            "resolveActivity",supervisor,new HookCallback(){
+                @Override protected void beforeHookedMethod(Param m)throws Throwable{
+                    Intent intent=(Intent)HookReflect.getObjectField(m.thisObject,"intent");
+                    String caller=(String)HookReflect.getObjectField(m.thisObject,"callingPackage");
                     if(!ManagementIntent.caller(caller)||!ManagementIntent.supported(intent))return;
-                    int launchUser=XposedHelpers.getIntField(m.thisObject,"userId");
+                    int launchUser=HookReflect.getIntField(m.thisObject,"userId");
                     long token=Binder.clearCallingIdentity();
                     try{
                         Intent corrected=normalize(intent,launchUser);if(corrected==null)return;
-                        XposedHelpers.setObjectField(m.thisObject,"intent",corrected);
-                        XposedHelpers.setIntField(m.thisObject,"userId",0);
+                        HookReflect.setObjectField(m.thisObject,"intent",corrected);
+                        HookReflect.setIntField(m.thisObject,"userId",0);
                     }catch(Exception error){
                         // Abort a stale clone request; falling back would edit the owner application.
                         android.util.Log.e(ProfileHook.TAG,"Clone settings launch refused",error);

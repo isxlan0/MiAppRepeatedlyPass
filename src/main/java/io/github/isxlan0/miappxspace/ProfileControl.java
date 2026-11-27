@@ -19,7 +19,7 @@ public final class ProfileControl {
     }
     static int id(String arg){int id=Integer.parseInt(arg);if(id<CloneRegistry.MIN||id>999)throw new IllegalArgumentException("Use CLONE profile ID 900..999");return id;}
     static void ready()throws Exception{
-        if(!Control.ready())throw new IllegalStateException("System Hook not active; enable android scope and reboot");
+        if(!Control.ready())throw new IllegalStateException("System Hook not active; enable System Framework (system) scope and reboot");
         Properties s=new Properties();try(FileInputStream in=new FileInputStream(new File(Registry.DIR,"hook.status"))){s.load(in);}
         if(!"native-clone-profiles".equals(s.getProperty("mode")))throw new IllegalStateException("Previous alias Hook still loaded; reboot to load native CLONE Hook");
     }
@@ -114,6 +114,7 @@ public final class ProfileControl {
     public static void main(String[] a){
         try{
             if(android.os.Process.myUid()!=0)throw new SecurityException("Root required");
+            if(a.length==2&&a[0].equals("health")){ModuleHealth.update(new File(a[1]));System.exit(0);return;}
             if(a.length==0||a[0].equals("help")){System.out.println("MiApp XSpace "+BuildConfig.VERSION_NAME+"\nstatus | list | create-space ID | create PACKAGE ID | start PACKAGE ID | remove PACKAGE ID | remove-space ID | recover ID | boot-spaces | reset-plan | remove-all | launcher-plan | repair-launcher\n顺序为 999（应用2，系统分身）、998（应用3）、997（应用4）；每个应用最多三个分身。删除会清除对应数据。");return;}
             if(a[0].equals("status")){System.out.println("System hook active: "+Control.ready());try{ready();System.out.println("Mode: native-clone-profiles");}catch(Exception e){System.out.println(e.getMessage());}System.out.println(Control.run(CMD,"user","list","-v","--all"));return;}
             if(a[0].equals("list")){Properties p=CloneRegistry.read();for(String k:new TreeSet<>(p.stringPropertyNames()))System.out.println(k+"="+p.getProperty(k));return;}

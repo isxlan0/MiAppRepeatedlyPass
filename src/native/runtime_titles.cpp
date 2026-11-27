@@ -23,9 +23,12 @@ static Encode encode=nullptr;
 static std::mutex labelsMutex;
 static std::unordered_map<std::string,std::string> labels;
 static ino_t labelInode=0;
+#ifndef MIAPP_OWNER_LABELS_PATH
+#define MIAPP_OWNER_LABELS_PATH "/data/user_de/0/com.miui.home/files/miapp-owner-labels.tsv"
+#endif
 static std::string owner_label(const std::string& package){
     std::lock_guard<std::mutex> guard(labelsMutex);
-    const char* path="/data/user_de/0/com.miui.home/files/miapp-owner-labels.tsv";struct stat state{};
+    const char* path=MIAPP_OWNER_LABELS_PATH;struct stat state{};
     if(!stat(path,&state)&&state.st_ino!=labelInode){
         FILE* file=std::fopen(path,"r");
         if(file){

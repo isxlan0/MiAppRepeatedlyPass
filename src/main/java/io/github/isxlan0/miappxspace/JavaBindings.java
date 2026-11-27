@@ -1,11 +1,12 @@
 package io.github.isxlan0.miappxspace;
 
 import java.io.File;
+import android.content.pm.ApplicationInfo;
 import java.lang.reflect.*;
 import java.util.*;
 import static io.github.isxlan0.miappxspace.DexModel.need;
 
-/** Process-local bindings are rescanned from the APK actually loaded by SecurityCore. */
+/** Bindings follow the APKs loaded by this process; disk entries are only an optimization. */
 final class JavaBindings {
     private static Map<String,AccessibleObject> members=Collections.emptyMap();
     private static Properties bindings=new Properties();
@@ -24,8 +25,24 @@ final class JavaBindings {
         }found.setAccessible(true);return found;
     }
     static void prepare(String apk,ClassLoader loader)throws Exception {
-        Properties scanned=JavaPrepare.security(new DexModel.Archive(new File(apk)),JavaPrepare.patterns());Map<String,AccessibleObject> next=new HashMap<>();
-        for(String key:scanned.stringPropertyNames())if(!key.startsWith("resource."))next.put(key,resolve(scanned.getProperty(key),loader));
+        prepare(Collections.singletonList(new File(apk)),null,loader);
+    }
+    static List<File> apks(ApplicationInfo app){
+        List<File> files=new ArrayList<>();files.add(new File(app.sourceDir));
+        if(app.splitSourceDirs!=null)for(String path:app.splitSourceDirs)files.add(new File(path));
+        return files;
+    }
+    static File cache(ApplicationInfo app,String name){
+        String data=app.deviceProtectedDataDir!=null?app.deviceProtectedDataDir:app.dataDir;
+        return data==null?null:new File(data,"cache/miapp-bindings/"+name+".properties");
+    }
+    static String runtime(){return BuildConfig.VERSION_CODE+":"+android.os.Build.FINGERPRINT;}
+    static void prepare(ApplicationInfo app,ClassLoader loader)throws Exception {prepare(apks(app),cache(app,"security"),loader);}
+    private static void prepare(List<File> apks,File cache,ClassLoader loader)throws Exception {
+        Map<String,AccessibleObject> next=new HashMap<>();
+        Properties scanned=BindingCache.resolve(apks,JavaPrepare.patterns(),cache,runtime(),result->{
+            next.clear();for(String key:result.stringPropertyNames())if(!key.startsWith("resource."))next.put(key,resolve(result.getProperty(key),loader));
+        });
         // Publish only after the entire scan and every reflection lookup succeeds.
         bindings=scanned;members=Collections.unmodifiableMap(next);
     }

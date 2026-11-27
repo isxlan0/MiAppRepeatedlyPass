@@ -1,97 +1,73 @@
 #!/system/bin/sh
-# Executed in a private mount namespace by customize.sh. Only fresh, read-only
-# views of ROM partitions are used; installed module overlays are never inputs.
+# Private namespace: APKs are recognized in their own process, never here.
 set -eu
 MODPATH=$1
 WORK="$MODPATH/.native-prepare"
-stage="initialize scan workspace"
+stage="initialize system scan workspace"
 mounted_ext=0
-mounted_product=0
-mounted_system=0
 finish() {
   result=$?
   trap - EXIT
-  if [ "$result" -ne 0 ]; then
-    echo "FAIL: $stage (exit=$result)" >&2
+  [ "$result" -eq 0 ] || echo "FAIL: $stage (exit=$result)" >&2
+  if [ "$mounted_ext" = 1 ]; then
+    /system/bin/umount "$WORK/system_ext" || result=1
   fi
-  for partition in system product system_ext; do
-    case "$partition" in
-      system) mounted=$mounted_system ;;
-      product) mounted=$mounted_product ;;
-      system_ext) mounted=$mounted_ext ;;
-    esac
-    if [ "$mounted" = 1 ]; then
-      /system/bin/umount "$WORK/$partition" || {
-        echo "FAIL: unmount scan workspace: $partition" >&2
-        result=1
-      }
-    fi
-  done
   exit "$result"
 }
 trap finish EXIT
-scan_stage() {
-  stage=$1
-  echo "- [prepare] $stage"
-}
+scan_stage() { stage=$1; echo "- [prepare] $stage"; }
 scan_stage "$stage"
-mkdir -p "$WORK/system_ext" "$WORK/product" "$WORK/system"
-scan_stage "mount original ROM partitions read-only"
+[ "$(/system/bin/getprop ro.build.version.sdk)" = 37 ] || { echo "Unsupported Android API"; exit 1; }
+mkdir -p "$WORK/system_ext"
+scan_stage "mount original system_ext read-only"
 /system/bin/mount -o rprivate none /
-rom_mount() {
-  mountpoint=$1
-  output=$2
-  source=$(awk -v target="$mountpoint" '$2 == target && ($3 == "erofs" || $3 == "ext4") {print $1; exit}' /proc/mounts)
-  fstype=$(awk -v target="$mountpoint" '$2 == target && ($3 == "erofs" || $3 == "ext4") {print $3; exit}' /proc/mounts)
-  [ -b "$source" ] || { echo "Cannot locate original partition for $mountpoint"; return 1; }
-  case "$fstype" in
-    erofs) /system/bin/mount -t erofs -o ro "$source" "$output" ;;
-    ext4) /system/bin/mount -t ext4 -o ro,noload "$source" "$output" ;;
-    *) return 1 ;;
-  esac
-}
-rom_mount /system_ext "$WORK/system_ext"
-mounted_ext=1
-rom_mount /product "$WORK/product"
-mounted_product=1
-if awk '$2 == "/system" && ($3 == "erofs" || $3 == "ext4") {found=1} END {exit !found}' /proc/mounts; then
-  rom_mount /system "$WORK/system"
-  SYSTEM_ROOT="$WORK/system"
-else
-  rom_mount / "$WORK/system"
-  SYSTEM_ROOT="$WORK/system/system"
-fi
-mounted_system=1
-
-# Resolve Java members from DEX code, references and resource identities. Prefer
-# an installed SecurityCore update when it is the APK the next process will load.
-SECURITY_APK="$WORK/product/app/SecurityCoreAdd/SecurityCoreAdd.apk"
-scan_stage "query active SecurityCore APK"
-# cmd/pm passes stdout AND stderr to system_server through Binder. The parent
-# redirects this script to a module log labelled system_file, which system_server
-# cannot write. Capture both descriptors in the pipe, and print errors ourselves.
-if active_security=$(/system/bin/pm path --user 0 com.miui.securitycore 2>&1); then
-  :
-else
-  query_result=$?
-  echo "Cannot query active SecurityCore APK (exit=$query_result): $active_security" >&2
-  exit "$query_result"
-fi
-case "$active_security" in
-  package:/product/app/SecurityCoreAdd/SecurityCoreAdd.apk) ;;
-  package:/data/app/*) SECURITY_APK=${active_security#package:} ;;
-  *) echo "Unsupported active SecurityCore location: $active_security"; exit 1 ;;
+source=$(awk '$2 == "/system_ext" && ($3 == "erofs" || $3 == "ext4") {print $1; exit}' /proc/mounts)
+fstype=$(awk '$2 == "/system_ext" && ($3 == "erofs" || $3 == "ext4") {print $3; exit}' /proc/mounts)
+[ -b "$source" ] || { echo "Cannot locate original system_ext partition"; exit 1; }
+case "$fstype" in
+  erofs) /system/bin/mount -t erofs -o ro "$source" "$WORK/system_ext" ;;
+  ext4) /system/bin/mount -t ext4 -o ro,noload "$source" "$WORK/system_ext" ;;
+  *) exit 1 ;;
 esac
-scan_stage "scan Java methods, references and resources"
-CLASSPATH="$MODPATH/bridge.apk" /system/bin/app_process /system/bin \
-  io.github.isxlan0.miappxspace.JavaPrepare \
-  "$SYSTEM_ROOT" "$WORK/system_ext" "$SECURITY_APK" "$MODPATH/java-layout.properties"
-
-# app_process supplies the installed Android Java runtime; no Python dependency.
-# A new module ZIP always contains unconfigured wrappers (ready=0).
-scan_stage "scan native functions and extract original libraries"
-CLASSPATH="$MODPATH/bridge.apk" /system/bin/app_process /system/bin \
-  io.github.isxlan0.miappxspace.NativePrepare \
-  "$WORK/product/priv-app/MiuiHome/MiuiHome.apk" "$WORK/system_ext/lib64" \
-  "$MODPATH/native-layout.properties" "$MODPATH"
-scan_stage "Java and native adaptation complete"
+mounted_ext=1
+fingerprint() {
+  for input in "$@"; do
+    digest=$(/system/bin/sha256sum "$input") || return 1
+    echo "${digest%% *}"
+  done
+}
+system_inputs() {
+  fingerprint "$WORK/system_ext/lib64/libhyper_os_security_public.so" \
+    "$WORK/system_ext/lib64/libhyper_os_bundle_public.so" \
+    "$WORK/system_ext/lib64/libhyper_os_bundle_private.dylib.so" \
+    "$MODPATH/bin/prepare-system" "$MODPATH/.native-templates/"*.so
+}
+scan_stage "check current ROM and module library content"
+inputs=$(system_inputs)
+if [ -f "$MODPATH/system-inputs.sha256" ] && [ "$inputs" = "$(cat "$MODPATH/system-inputs.sha256")" ]; then
+  if outputs=$(fingerprint "$MODPATH/system/system_ext/lib64/"*.so) && \
+     [ -f "$MODPATH/system-outputs.sha256" ] && [ "$outputs" = "$(cat "$MODPATH/system-outputs.sha256")" ]; then
+    echo "PASS: system library cache unchanged"
+    exit 0
+  fi
+fi
+scan_stage "recognize and stage current ROM system libraries"
+# Fixed child paths are temporary, module-owned generations.
+rm -rf "$MODPATH/.system-next"
+mkdir -p "$MODPATH/.system-next/system_ext/lib64"
+cp -p "$MODPATH/.native-templates/"*.so "$MODPATH/.system-next/system_ext/lib64/"
+"$MODPATH/bin/prepare-system" "$WORK/system_ext/lib64" "$MODPATH/.system-next/system_ext/lib64"
+outputs=$(fingerprint "$MODPATH/.system-next/system_ext/lib64/"*.so)
+confirmed=$(system_inputs)
+[ "$inputs" = "$confirmed" ] || { echo "System inputs changed during recognition"; exit 1; }
+chmod 0755 "$MODPATH/.system-next" "$MODPATH/.system-next/system_ext" "$MODPATH/.system-next/system_ext/lib64"
+chmod 0644 "$MODPATH/.system-next/system_ext/lib64/"*.so
+/system/bin/chcon -R u:object_r:system_file:s0 "$MODPATH/.system-next"
+scan_stage "publish verified system libraries before mounting"
+rm -rf "$MODPATH/.system-previous"
+if [ -d "$MODPATH/system" ]; then mv "$MODPATH/system" "$MODPATH/.system-previous"; fi
+mv "$MODPATH/.system-next" "$MODPATH/system"
+printf '%s\n' "$inputs" > "$MODPATH/system-inputs.sha256"
+printf '%s\n' "$outputs" > "$MODPATH/system-outputs.sha256"
+rm -rf "$MODPATH/.system-previous"
+echo "PASS: system adaptation complete"

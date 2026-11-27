@@ -22,10 +22,35 @@ import android.widget.Toast;
 public final class MainActivity extends Activity {
     private LinearLayout content;
     private int background, surface, ink, muted, accent, border;
+    private TextView activation,frameworkInfo,healthDetail;
+    private final android.os.Handler statusHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private boolean resumed;
+    private int statusRequest;
+    private final Runnable statusChanged=()->statusHandler.post(()->{if(resumed)checkStatus();});
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         render();
+    }
+    @Override protected void onResume(){super.onResume();resumed=true;ModuleApplication.statusListeners.add(statusChanged);checkStatus();}
+    @Override protected void onPause(){resumed=false;ModuleApplication.statusListeners.remove(statusChanged);statusRequest++;statusHandler.removeCallbacksAndMessages(null);super.onPause();}
+    private void checkStatus() {
+        final int request=++statusRequest;
+        // Connection callbacks update the title immediately. Framework metadata
+        // is optional and cannot hold the status behind a remote call.
+        showStatus(ActivationStatus.evaluate(!ModuleApplication.services.isEmpty()));
+        Thread worker=new Thread(()->{
+            ActivationStatus status=ActivationStatus.read();
+            statusHandler.post(()->{
+                if(!resumed||request!=statusRequest)return;
+                showStatus(status);
+            });
+        },"MiApp-status");worker.setDaemon(true);worker.start();
+    }
+    private void showStatus(ActivationStatus status) {
+        activation.setText(status.title);activation.setTextColor(status.problem?Color.rgb(190,65,55):status.healthy?accent:ink);
+        frameworkInfo.setText(status.framework);healthDetail.setText(status.detail);
+        healthDetail.setVisibility(status.detail.isEmpty()?View.GONE:View.VISIBLE);
     }
     private int dp(int size) { return Math.round(size * getResources().getDisplayMetrics().density); }
     private GradientDrawable panel(int color) {
@@ -79,6 +104,12 @@ public final class MainActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(dark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         text(content, "MiApp XSpace", 30, ink, true);
         text(content, "多分身模块  ·  " + BuildConfig.VERSION_NAME, 14, muted, false);
+        LinearLayout status=card("运行状态");
+        activation=text(status,"",18,ink,true);
+        frameworkInfo=text(status,"",14,muted,false);
+        healthDetail=text(status,"",14,muted,false);
+        frameworkInfo.setTextIsSelectable(true);healthDetail.setTextIsSelectable(true);
+        showStatus(ActivationStatus.evaluate(!ModuleApplication.services.isEmpty()));
         renderAbout();
     }
     private void renderAbout() {
@@ -94,8 +125,6 @@ public final class MainActivity extends Activity {
             link(credits, credit[0], credit[2]); text(credits, credit[1], 14, muted, false);
         }
         text(credits, "原始转发库来自适配设备的 HyperOS ROM；小米 / HyperOS 系统组件并非本项目原创，其权利归相应权利人。", 14, muted, false);
-        LinearLayout known = card("已知问题");
-        text(known, "分身 3 和 4 暂时无法分别设置通知管理、权限管理。其他设备与系统版本仍需验证。", 14, muted, false);
         LinearLayout uninstall = card("卸载说明"); text(uninstall, AppInfo.UNINSTALL, 14, ink, false);
         LinearLayout disclaimer = card("免责声明"); text(disclaimer, AppInfo.DISCLAIMER, 14, muted, false);
         text(disclaimer, "本项目原创代码使用 MIT License；依赖项目与系统组件遵循各自许可证。", 14, muted, false);

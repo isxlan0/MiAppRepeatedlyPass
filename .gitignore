@@ -29,6 +29,7 @@ __pycache__/
 /module/system/system_ext/lib64/libhyper_os_security_public.so
 /module/system/system_ext/lib64/libhyper_os_bundle_public.so
 /module/system/system_ext/lib64/libhyper_os_bundle_private.dylib.so
+/module/bin/prepare-system
 
 # Local credentials and temporary files
 *.p12

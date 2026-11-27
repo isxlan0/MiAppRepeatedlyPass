@@ -7,6 +7,7 @@ import static io.github.isxlan0.miappxspace.DexModel.*;
 
 /** Semantic-identity scanner: reviewed method shapes plus a consistent reference graph. */
 public final class JavaPrepare {
+    static final String CREATE_USER="Lcom/android/server/pm/UserManagerService;->createUserInternalUnchecked(Ljava/lang/String;Ljava/lang/String;IIZ[Ljava/lang/String;Ljava/lang/Object;)Landroid/content/pm/UserInfo;";
     static Properties patterns()throws IOException {
         Properties p=new Properties();try(InputStream in=JavaPrepare.class.getClassLoader().getResourceAsStream("assets/java-patterns.properties")){
             need(in!=null,"Missing Java recognition patterns");p.load(in);
@@ -91,27 +92,72 @@ public final class JavaPrepare {
             File file=new File(name.startsWith("miui-")?ext:system,"framework/"+name);Archive normalizer=new Archive();
             Set<String> methods=new HashSet<>(Arrays.asList(lines(p,"framework."+name+".methods"))),fields=new HashSet<>(Arrays.asList(lines(p,"framework."+name+".fields")));
             Set<String> seenMethods=new HashSet<>(),seenFields=new HashSet<>(),entries=new HashSet<>();Set<String> missingClasses=new HashSet<>(Arrays.asList(lines(p,"framework."+name+".classes")));
+            Map<String,SortedSet<String>> candidates=new TreeMap<>();
+            for(String id:methods)candidates.put(methodName(id),new TreeSet<>());
+            try {
             // Read one DEX at a time. Keeping an entire framework's object graph
             // alive exceeds app_process's ordinary 256 MiB heap on this device.
             try(ZipFile zip=new ZipFile(file)){Enumeration<? extends ZipEntry> all=zip.entries();int total=0;
                 while(all.hasMoreElements()){ZipEntry entry=all.nextElement();if(!entry.getName().matches(DEX_NAME))continue;need(entries.add(entry.getName()),"Duplicate framework DEX");
                     byte[] data;try(InputStream in=zip.getInputStream(entry)){data=bytes(in,64*1024*1024);}total+=data.length;need(total<=256*1024*1024,"Framework DEX budget exceeded");
-                    verifyDex(data,normalizer,p,methods,fields,seenMethods,seenFields,missingClasses);
+                    verifyDex(data,normalizer,p,methods,fields,seenMethods,seenFields,missingClasses,candidates,report);
                 }
             }
             Set<String> missing=new HashSet<>(methods);missing.removeAll(seenMethods);Set<String> missingFields=new HashSet<>(fields);missingFields.removeAll(seenFields);
-            need(missing.isEmpty()&&missingFields.isEmpty()&&missingClasses.isEmpty(),"Missing framework members: "+missing+" "+missingFields+" "+missingClasses);
+            need(missing.isEmpty()&&missingFields.isEmpty()&&missingClasses.isEmpty(),missingMembers(missing,missingFields,missingClasses,candidates));
             report.setProperty(name+".sha256",shaFile(file));report.setProperty(name+".methods",Integer.toString(methods.size()));System.out.println("PASS: "+name+" "+methods.size()+" required method shapes");
+            } catch(Exception error) {
+                String digest;try{digest=shaFile(file);}catch(Exception unreadable){digest="unavailable";}
+                throw new IllegalArgumentException("Framework archive: "+file+"\narchive.sha256="+digest+"\n"+error.getMessage(),error);
+            }
         }
     }
+    static String methodName(String id){return id.substring(0,id.indexOf('('));}
+    static Map<String,String> frameworkContracts(Properties p,Set<String> methods){
+        Map<String,String> contracts=new HashMap<>();
+        for(String id:methods){
+            List<String> signatures=new ArrayList<>();signatures.add(id);
+            String variants=p.getProperty("framework.alternatives."+id);
+            if(variants!=null)signatures.addAll(Arrays.asList(variants.split("\n")));
+            for(String variant:signatures){
+                need(methodName(id).equals(methodName(variant)),"Framework alternative must keep its declaring class and name: "+variant);
+                required(p,"framework.method."+variant);
+                need(contracts.put(variant,id)==null,"Overlapping framework alternatives: "+variant);
+            }
+        }return contracts;
+    }
+    static String missingMembers(Set<String> methods,Set<String> fields,Set<String> classes,Map<String,SortedSet<String>> candidates){
+        StringBuilder message=new StringBuilder("Missing framework members:");
+        for(String id:new TreeSet<>(methods)){
+            message.append("\nexpected method: ").append(id);
+            Set<String> actual=candidates.get(methodName(id));
+            if(actual==null||actual.isEmpty())message.append("\nactual same-name method: <none>");
+            else for(String found:actual)message.append("\nactual same-name method: ").append(found);
+        }
+        for(String id:new TreeSet<>(fields))message.append("\nmissing field: ").append(id);
+        for(String id:new TreeSet<>(classes))message.append("\nmissing class: ").append(id);
+        return message.toString();
+    }
     static void verifyDex(byte[] data,Archive normalizer,Properties p,Set<String> methods,Set<String> fields,Set<String> seenMethods,Set<String> seenFields,Set<String> missingClasses)throws Exception {
+        verifyDex(data,normalizer,p,methods,fields,seenMethods,seenFields,missingClasses,Collections.emptyMap(),new Properties());
+    }
+    static void verifyDex(byte[] data,Archive normalizer,Properties p,Set<String> methods,Set<String> fields,Set<String> seenMethods,Set<String> seenFields,Set<String> missingClasses,Map<String,SortedSet<String>> candidates,Properties report)throws Exception {
+        Map<String,String> contracts=frameworkContracts(p,methods);
         for(Cls cls:new Dex(data).classes){
             missingClasses.remove(cls.name);
             String parent=p.getProperty("framework.parent."+cls.name);if(parent!=null)need(parent.equals(cls.parent),"Framework inheritance changed: "+cls.name);
             String inherited=p.getProperty("framework.inherited."+cls.name);if(inherited!=null)for(Method m:cls.methods)need(!Arrays.asList(inherited.split("\n")).contains(m.name),"Framework method declaration moved: "+m.id());
-            for(Method m:cls.methods){String id=m.id();if(methods.contains(id)){
-                need(seenMethods.add(id),"Duplicate framework method "+id);String shape=normalizer.shape(m,false).hash;
-                need(Arrays.asList(lines(p,"framework.method."+id)).contains(shape),"Framework method logic changed: "+id);
+            for(Method m:cls.methods){String id=m.id();
+                Set<String> actual=candidates.get(methodName(id));
+                if(actual!=null&&!methods.contains(id)){
+                    String shape;try{shape=normalizer.shape(m,false).hash;}catch(IllegalArgumentException unsupported){shape="unavailable ("+unsupported.getMessage()+")";}
+                    actual.add(id+"\n  flags=0x"+Integer.toHexString(m.flags)+"; shape="+shape);
+                }
+                String contract=contracts.get(id);
+                if(contract!=null){
+                need(seenMethods.add(contract),"Duplicate or ambiguous framework method: "+contract+"; candidate="+id);String shape=normalizer.shape(m,false).hash;
+                need(Arrays.asList(lines(p,"framework.method."+id)).contains(shape),"Framework method logic changed: "+id+"\nexpected shape: "+String.join(", ",lines(p,"framework.method."+id))+"\nactual shape: "+shape);
+                report.setProperty("framework.binding."+contract,id);
             }}
             for(Field f:cls.fields){String id=f.id();if(fields.contains(id))need(seenFields.add(id)&&Integer.toString(f.flags).equals(required(p,"framework.field."+id)),"Framework field changed: "+id);}
         }

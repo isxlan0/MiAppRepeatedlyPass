@@ -8,16 +8,44 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <string>
+#include <sstream>
+#include <chrono>
 #include "native_layout.h"
+#include "native_startup.h"
 
-// Writable file data so the installer can fill it without recompiling on-device.
-// ready remains zero in the distributed ZIP and is set only after full analysis.
+// Process-local recognition result. No device-specific addresses in the wrapper.
 MiappLayout miapp_layout={{'M','I','A','P','P','_','L','A','Y','O','U','T','_','V','1','!'},1,0,{},{},{},0,0,0,0,0,0,0,{},{}};
 
 extern "C" bool Security_is_xspace_user_id(int32_t);
 extern "C" void miapp_dart_x1();
 extern "C" void miapp_dart_x2();
 bool miapp_install_runtime_titles(uintptr_t);
+
+#ifndef MIAPP_BUILD_ID
+#define MIAPP_BUILD_ID "unknown"
+#endif
+#ifndef MIAPP_NATIVE_STATUS_PATH
+#define MIAPP_NATIVE_STATUS_PATH "/data/user/0/com.miui.home/files/miapp-native.status"
+#endif
+static void native_status(const char* state,const char* detail){
+    char boot[64]={},stat[4096]={};
+    FILE* file=std::fopen("/proc/sys/kernel/random/boot_id","r");if(!file)return;
+    std::fgets(boot,sizeof(boot),file);std::fclose(file);boot[strcspn(boot,"\r\n")]=0;
+    file=std::fopen("/proc/self/stat","r");if(!file)return;
+    std::fgets(stat,sizeof(stat),file);std::fclose(file);
+    const char* end=std::strrchr(stat,')');if(!end)return;
+    std::istringstream fields(end+2);std::string start;
+    for(int i=0;i<=19;i++)if(!(fields>>start))return;
+    const char* path=MIAPP_NATIVE_STATUS_PATH;
+    std::string temporary=std::string(path)+"."+std::to_string(getpid())+".tmp";
+    int fd=open(temporary.c_str(),O_WRONLY|O_CREAT|O_TRUNC|O_NOFOLLOW|O_CLOEXEC,0600);
+    if(fd<0){__android_log_print(ANDROID_LOG_WARN,"MiAppDartBadge","Cannot write native health: %d",errno);return;}
+    FILE* out=fdopen(fd,"w");if(!out){close(fd);return;}
+    std::fprintf(out,"boot=%s\npid=%d\nstart=%s\nbuild=%s\nstate=%s\ndetail=%s\n",boot,getpid(),start.c_str(),MIAPP_BUILD_ID,state,detail);
+    if(std::fclose(out)==0)rename(temporary.c_str(),path);
+}
 
 extern "C" __attribute__((visibility("hidden"))) int miapp_dart_validate(int64_t id){
     // Do not truncate a 64-bit Dart ID into a valid clone ID.
@@ -44,34 +72,6 @@ static void* nearby(uintptr_t base,size_t size){
         }
     }
     return nullptr;
-}
-
-// Validate the complete executable segment before applying any patch. An OTA or
-// APK update after module installation must not reuse stale generated addresses.
-static uint64_t code_hash(uintptr_t start,size_t length){
-    uint64_t hash=0xcbf29ce484222325ULL;
-    const auto bytes=reinterpret_cast<const uint8_t*>(start);
-    for(size_t i=0;i<length;i++){hash^=bytes[i];hash*=0x100000001b3ULL;}
-    return hash;
-}
-static uintptr_t library_base(const MiappLibraryLayout& layout){
-    if(miapp_layout.version!=1||miapp_layout.ready!=1||!layout.codeSize||layout.codeSize>128*1024*1024)return 0;
-    FILE* maps=std::fopen("/proc/self/maps","r");if(!maps)return 0;
-    char line[1024];uintptr_t base=0,covered=0;
-    while(std::fgets(line,sizeof(line),maps)){
-        unsigned long start=0,end=0,offset=0;char perms[5]={};
-        if(std::sscanf(line,"%lx-%lx %4s %lx",&start,&end,perms,&offset)!=4||
-           !std::strstr(line,"/product/priv-app/MiuiHome/MiuiHome.apk"))continue;
-        if(offset==layout.zipOffset&&perms[0]=='r')base=start;
-        if(base&&perms[0]=='r'&&perms[2]=='x'){
-            uintptr_t first=base+layout.codeAddress,last=first+layout.codeSize;
-            // Check file offsets as well as addresses: only this APK entry counts.
-            uintptr_t at=first+covered;
-            if(start<=at&&end>at&&offset+(at-start)==layout.zipOffset+layout.codeFileOffset+covered)
-                covered=(end<last?end:last)-first;
-        }
-    }
-    std::fclose(maps);return covered==layout.codeSize?base:0;
 }
 
 static bool patch(uintptr_t base){
@@ -164,40 +164,60 @@ static bool prefer_clone_labels(uintptr_t base){
     __android_log_print(ANDROID_LOG_INFO,"MiAppDartBadge","Clone labels resolve through LauncherApps with actual users");return true;
 }
 
-static void* install(void*){
-    if(miapp_layout.ready!=1){__android_log_print(ANDROID_LOG_ERROR,"MiAppDartBadge","Install-time layout missing");return nullptr;}
-    for(int attempt=0;attempt<600;attempt++){
-        uintptr_t base=library_base(miapp_layout.dart),native=library_base(miapp_layout.native);
-        if(base&&native){
-            if(code_hash(base+miapp_layout.dart.codeAddress,miapp_layout.dart.codeSize)!=miapp_layout.dart.codeHash){
-                __android_log_print(ANDROID_LOG_ERROR,"MiAppDartBadge","Launcher changed after installation; reinstall module");return nullptr;
+static MiappStartup startup;
+static MiappInstallState try_install(){
+    return startup.run(getpid(),[]{
+        native_status("starting","Recognizing launcher libraries before native API return");
+        auto started=std::chrono::steady_clock::now();
+        uintptr_t base=0,native=0;int result=miapp_scan_runtime(miapp_layout,base,native);
+        if(result<0){native_status("error",miapp_scan_error());return MiappInstallState::Failed;}
+        if(result==1){
+            if(!miapp_validate_runtime()){native_status("error",miapp_scan_error());return MiappInstallState::Failed;}
+            if(!patch(base)||!prefer_clone_labels(base)||!miapp_install_runtime_titles(native)){
+                native_status("error","Launcher patch installation failed; see MiAppDartBadge/MiAppRuntimeTitles log");return MiappInstallState::Failed;
             }
-            if(code_hash(native+miapp_layout.native.codeAddress,miapp_layout.native.codeSize)!=miapp_layout.native.codeHash){
-                __android_log_print(ANDROID_LOG_ERROR,"MiAppRuntimeTitles","Launcher changed after installation; reinstall module");return nullptr;
-            }
-            if(!patch(base)||!prefer_clone_labels(base)||!miapp_install_runtime_titles(native))return nullptr;
-            return nullptr;
+            native_status("ready","Launcher badge and title hooks installed");
+            auto elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+            __android_log_print(ANDROID_LOG_INFO,"MiAppDartBadge","Launcher hooks ready before native API return in %.1f ms (PID %d)",elapsed,getpid());
+            return MiappInstallState::Ready;
         }
+        return MiappInstallState::Pending;
+    });
+}
+static void* install(void*){
+    for(int attempt=0;attempt<600;attempt++){
+        if(try_install()!=MiappInstallState::Pending)return nullptr;
         usleep(100000);
     }
-    __android_log_print(ANDROID_LOG_ERROR,"MiAppDartBadge","Runtime AOT mapping not found");return nullptr;
+    startup.run(getpid(),[]{
+        native_status("error","Runtime AOT mapping not found after 60 seconds");
+        __android_log_print(ANDROID_LOG_ERROR,"MiAppDartBadge","Runtime AOT mapping not found");
+        return MiappInstallState::Failed;
+    });
+    return nullptr;
 }
 
 // HyperOS Runtime preloads libraries in its native spawner. Constructors alone
 // cannot start a surviving child thread. Recheck the PID on native API use.
 void miapp_ensure_dart_badges(){
-    static std::atomic<pid_t> checked{0};pid_t pid=getpid();
-    if(checked.load(std::memory_order_relaxed)==pid)return;
+    pid_t pid=getpid();auto status=startup.state(pid);
+    if(status==MiappInstallState::Ready||status==MiappInstallState::Failed)return;
     char name[128]={};FILE* file=std::fopen("/proc/self/cmdline","r");
     if(file){std::fread(name,1,sizeof(name)-1,file);std::fclose(file);}
     // A native child can call us before it is renamed to com.miui.home.
-    // Only claim this PID once the desktop identity is established.
+    // Only attempt installation once the desktop identity is established.
     if(std::strcmp(name,"com.miui.home"))return;
-    pid_t previous=checked.exchange(pid);if(previous==pid)return;
+    // Do not let the first API call race an asynchronous full-ELF scan: the
+    // launcher caches its initial item titles and badges before the worker ends.
+    // If called by a constructor before both libraries are mapped, return to the
+    // loader and retry on the next API call as well as in the fallback worker.
+    if(try_install()!=MiappInstallState::Pending)return;
+    static std::atomic<pid_t> worker{0};
+    if(worker.exchange(pid)==pid)return;
     pthread_t thread;
     if(!pthread_create(&thread,nullptr,install,nullptr)){
-        pthread_detach(thread);__android_log_print(ANDROID_LOG_INFO,"MiAppDartBadge","Installing in native desktop PID %d",pid);
-    }else{pid_t expected=pid;checked.compare_exchange_strong(expected,0);}
+        pthread_detach(thread);__android_log_print(ANDROID_LOG_INFO,"MiAppDartBadge","Waiting for native desktop mappings in PID %d",pid);
+    }else{pid_t expected=pid;worker.compare_exchange_strong(expected,0);}
 }
 
 __attribute__((constructor)) static void initialize(){miapp_ensure_dart_badges();}

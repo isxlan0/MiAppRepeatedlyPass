@@ -6,7 +6,7 @@ import java.io.*;
 import java.nio.channels.FileLock;
 import java.util.*;
 import java.util.concurrent.*;
-import de.robv.android.xposed.*;
+
 
 /** Runs with system identity. Mutations are restricted to the original SecurityCore process. */
 final class ProfileBackend {
@@ -50,9 +50,9 @@ final class ProfileBackend {
         }catch(IOException e){return false;}
     }
     static void install(ClassLoader loader)throws Exception{
-        Class<?> stub=XposedHelpers.findClass("android.os.IUserManager$Stub",loader);
-        XposedBridge.hookAllMethods(stub,"onTransact",new XC_MethodHook(){
-            @Override protected void beforeHookedMethod(MethodHookParam hook)throws Throwable{
+        Class<?> stub=HookReflect.findClass("android.os.IUserManager$Stub",loader);
+        if(Hooks.hookAllMethods(stub,"onTransact",new HookCallback(){
+            @Override protected void beforeHookedMethod(Param hook)throws Throwable{
                 if(Integer.valueOf(0x00584302).equals(hook.args[0])){
                     Parcel in=(Parcel)hook.args[1],reply=(Parcel)hook.args[2];
                     try{
@@ -71,6 +71,7 @@ final class ProfileBackend {
                     String op=data.readString(),pkg=data.readString();int id=data.readInt();data.enforceNoDataAvail();
                     boolean readonly="spaces".equals(op);
                     if(!readonly&&!trusted(Binder.getCallingUid(),Binder.getCallingPid()))throw new SecurityException("Only owner SecurityCore may manage XSpace");
+                    if(!readonly)RuntimeHealth.requireReady();
                     ums=hook.thisObject;
                     identity=Binder.clearCallingIdentity();cleared=true;
                     if(pm==null)pm=service("package","android.content.pm.IPackageManager");
@@ -91,7 +92,7 @@ final class ProfileBackend {
                 }finally{if(cleared)Binder.restoreCallingIdentity(identity);}
                 reply.writeNoException();reply.writeBundle(result);hook.setResult(true);
             }
-        });
+        }).isEmpty())throw new IllegalStateException("XSpace system endpoint missing");
     }
     static void execute(String op,String pkg,int id,Properties p,Bundle out)throws Exception{
         if("reset-plan".equals(op)){out.putIntArray("ids",ProfileReset.plan(p));return;}
@@ -104,7 +105,7 @@ final class ProfileBackend {
             if((original.flags&ApplicationInfo.FLAG_SYSTEM)!=0)throw new SecurityException("System applications cannot be cloned here");
             id=CloneSlots.next(instances(pkg,p));
             if(id==CloneSlots.STOCK){out.putBoolean("stock",true);out.putInt("user",id);return;}
-            android.util.SparseBooleanArray removing=(android.util.SparseBooleanArray)XposedHelpers.getObjectField(ums,"mRemovingUserIds");
+            android.util.SparseBooleanArray removing=(android.util.SparseBooleanArray)HookReflect.getObjectField(ums,"mRemovingUserIds");
             if(removing.get(id))throw new IllegalStateException("这个分身空间刚被删除，需要重启后才能重新创建。");
             if(user(id)!=null)verify(id,p);
             if(user(id)==null){

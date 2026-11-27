@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-// Filled by NativePrepare inside the installed wrapper, after all checks pass.
+// Filled in the native launcher after inspecting its actual mapped libraries.
 // Addresses are ELF virtual addresses relative to the library's load bias.
 struct MiappLibraryLayout {
     uint64_t zipOffset, codeAddress, codeSize, codeHash, codeFileOffset;
@@ -17,3 +17,6 @@ struct MiappLayout {
 };
 static_assert(sizeof(MiappLayout)==240,"NativePrepare layout must match");
 extern MiappLayout miapp_layout;
+int miapp_scan_runtime(MiappLayout&,uintptr_t& dartBase,uintptr_t& nativeBase);
+const char* miapp_scan_error();
+bool miapp_validate_runtime();

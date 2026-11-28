@@ -181,6 +181,21 @@ python extract_ota_file.py '完整卡刷ZIP链接' --dump-erofs 'D:\Tools\erofs\
 
 当前支持未压缩存储 `payload.bin` 的完整 OTA ZIP、EROFS 文件系统，以及 REPLACE/BZ/XZ/ZERO 操作。不支持增量包、线刷 TGZ 或非 EROFS 分区；服务器不支持分段读取时直接报错。工作目录中的 `*.INCOMPLETE.img` 是只填入所需数据的临时稀疏镜像，不能刷入设备。
 
+可使用以下命令批量核对多个 ROM。列表每行填写“标识 HTTPS链接”，标识不得重复。提取器按分区目录定位四个框架 JAR、三个系统原生库、安全核心、手机管家、桌面、设置及系统属性；默认每份 ROM 的本次下载上限为 1024 MiB，可通过 `--max-download-mib` 调整。
+
+```powershell
+python ci/audit_ota_matrix.py --list 'OS卡刷机包列表.md' --output 'build/ota-audit'
+python ci/check_ota_matrix.py --fixtures 'build/ota-audit'
+```
+
+每份 ROM 的 `extraction.json` 保存来源、payload manifest 和文件 SHA-256；`compatibility.json` 及逐项日志记录当前源码的识别结果。检查器不会根据待测包生成新规则。设置通知接口额外检查方法签名，其存在性不代表完整行为已验证。完整提取和全部检查通过后，仍需在对应机型验证创建、启动、管理及删除分身。
+
+具备 Android ARM64 测试设备、ADB 和 NDK 时，可运行 `python ci/check_ota_native_device.py --serial <设备序列号> --fixtures 'build/ota-audit'`。该工具在设备独立临时目录运行生产用 C++ 系统库校验器和桌面扫描回归，分别报告安装阶段与桌面阶段的拒绝原因；不安装 APK、不修改现有模块、不重启设备，结束后删除本次临时目录。测试只映射 ROM 文件并修改测试进程自身的内存，不调用映射的 ROM 函数；结果不能视为该 ROM 已经完成实机刷入验证。
+
+完成上述两项检查且本地具备 `build/rom-audit/{4.0.0.44,4.0.4.0,4.0.6.0}` 旧样本时，可运行 `python ci/check_ota_adaptation.py --serial <设备序列号> --fixtures 'build/ota-audit'`。它验证辅助方法迁移的反例、错误调用目标、三版旧样本，并执行四种合成 Rust ABI 函数的真实跳板，检查 40 字节返回值、用户映射、跨页入口和不安全指令拒绝。该测试不会执行 OTA 原件中的函数。
+
+OS4 指令宽度和方法变体的电脑端回归使用 `python ci/check_os4_rules.py --annibale 'build/ota-annibale-20261128' --matrix 'build/ota-matrix-20261127' --legacy 'build/rom-audit'`。它在 256 MiB Java 堆限制下验证真实固件的编码变化、三版旧样本，以及分支、字段、监听器选择值等错误变体的拒绝，不需要 ADB。完整十份固件矩阵另外分别对两个 OTA 目录运行 `ci/check_ota_matrix.py`。
+
 ### 调试命令
 
 以下为 root 调试命令，普通用户无需执行；`repair-launcher` 会修复并重新加载桌面，`create` 会创建对应分身。

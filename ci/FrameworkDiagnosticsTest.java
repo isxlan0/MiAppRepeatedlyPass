@@ -85,6 +85,7 @@ public final class FrameworkDiagnosticsTest {
         System.out.println("PASS: truly absent method distinguished from changed overload");
         Files.copy(source.toPath(),jar.toPath(),StandardCopyOption.REPLACE_EXISTING);
         Properties mismatch=onlyCreation(patterns);mismatch.setProperty("framework.method."+OLD,"unreviewed-shape");
+        mismatch.setProperty("framework.canonical."+OLD,"unreviewed-canonical-shape");
         String changedShape=refused(work,mismatch);
         check(changedShape.contains("Framework method logic changed: "+OLD),"logic mismatch label");
         check(changedShape.contains("expected shape: unreviewed-shape"),"expected shape missing");

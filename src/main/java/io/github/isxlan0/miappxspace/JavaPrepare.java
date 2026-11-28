@@ -16,9 +16,10 @@ public final class JavaPrepare {
     static String required(Properties p,String key){String s=p.getProperty(key);need(s!=null,"Missing Java pattern: "+key);return s;}
     static String[] lines(Properties p,String key){String value=required(p,key);return value.isEmpty()?new String[0]:value.split("\n");}
     static final class Graph {
-        final Map<String,String> values=new HashMap<>(),reverse=new HashMap<>();final Set<String> movable;
-        Graph(Set<String> movable){this.movable=movable;}
-        Graph(Graph g){movable=g.movable;values.putAll(g.values);reverse.putAll(g.reverse);}
+        final Map<String,String> values=new HashMap<>(),reverse=new HashMap<>();final Set<String> movable,detached;
+        Graph(Set<String> movable){this(movable,Collections.emptySet());}
+        Graph(Set<String> movable,Set<String> detached){this.movable=movable;this.detached=detached;}
+        Graph(Graph g){movable=g.movable;detached=g.detached;values.putAll(g.values);reverse.putAll(g.reverse);}
         boolean put(String old,String actual){
             String before=values.get(old),other=reverse.get(actual);
             if(before!=null&&!before.equals(actual)||other!=null&&!other.equals(old))return false;
@@ -35,41 +36,71 @@ public final class JavaPrepare {
             if(!old.substring(0,2).equals(actual.substring(0,2)))return false;
             if(old.startsWith("T:"))return descriptor(old.substring(2),actual.substring(2));
             int a=old.indexOf("->"),b=actual.indexOf("->");String owner=old.substring(2,a);
-            if(!type(owner,actual.substring(2,b)))return false;
+            // R8 can move a static utility method independently of its old owner.
+            // Only explicitly reviewed, separately shape-checked methods qualify.
+            boolean moved=detached.contains(old);
+            if(!moved&&!type(owner,actual.substring(2,b)))return false;
             int x=old.indexOf(old.startsWith("M:")?'(':':',a),y=actual.indexOf(actual.startsWith("M:")?'(':':',b);
             if(!movable.contains(owner)&&!old.substring(a+2,x).equals(actual.substring(b+2,y)))return false;
             return descriptor(old.substring(x),actual.substring(y))&&put(old,actual);
         }
     }
     static final class Candidate {Method method;Shape shape;Candidate(Method m,Shape s){method=m;shape=s;}}
+    static List<String> methodVariants(Properties p,String key){
+        List<String> keys=new ArrayList<>();keys.add(key);
+        for(String name:p.getProperty(key+".variants","").split("\n"))if(!name.isEmpty())keys.add(key+".variant."+name);
+        return keys;
+    }
+    static List<String> shapeKeys(Properties p,String key){
+        List<String> keys=new ArrayList<>();keys.add(required(p,key+".hash"));
+        String canonical=p.getProperty(key+".canonical");if(canonical!=null)keys.add("c2:"+canonical);
+        return keys;
+    }
     static Graph bind(Graph prior,String id,String[] refs,Candidate candidate){
         if(refs.length!=candidate.shape.refs.size())return null;Graph next=new Graph(prior);
         if(!next.bind("M:"+id,"M:"+candidate.method.id()))return null;
-        for(int i=0;i<refs.length;i++)if(!next.bind(refs[i],candidate.shape.refs.get(i)))return null;
+        boolean detached=prior.detached.contains("M:"+id);
+        if(detached&&(candidate.method.flags&8)==0)return null;
+        for(int i=detached?1:0;i<refs.length;i++)if(!next.bind(refs[i],candidate.shape.refs.get(i)))return null;
         return next;
     }
     static Properties security(Archive apk,Properties p)throws Exception {
         int count=Integer.parseInt(required(p,"security.count"));Set<String> hashes=new HashSet<>(),protos=new HashSet<>();
         for(int i=0;i<count;i++)for(String alias:lines(p,"security."+i+".methods")){
-            String key="security."+i+".method."+alias;hashes.add(required(p,key+".hash"));protos.add(required(p,key+".proto"));
+            String key="security."+i+".method."+alias;for(String variant:methodVariants(p,key))hashes.addAll(shapeKeys(p,variant));protos.add(required(p,key+".proto"));
         }
+        boolean canonicalEnabled=hashes.stream().anyMatch(h->h.startsWith("c2:"));
         Map<String,List<Candidate>> index=new HashMap<>();
         for(Method m:apk.methods.values())if(protos.contains(apk.normalizedType(m.proto,true))){
             Shape shape;try{shape=apk.shape(m,true);}catch(IllegalArgumentException unsupported){continue;}
             if(hashes.contains(shape.hash))index.computeIfAbsent(shape.hash,k->new ArrayList<>()).add(new Candidate(m,shape));
+            if(canonicalEnabled)try{
+                Shape canonical=apk.canonicalShape(m,true);String key="c2:"+canonical.hash;
+                if(hashes.contains(key))index.computeIfAbsent(key,k->new ArrayList<>()).add(new Candidate(m,canonical));
+            }catch(IllegalArgumentException unsupported){/* Legacy exact shapes remain available. */}
         }
         List<Properties> successes=new ArrayList<>();List<String> failures=new ArrayList<>();
         for(int i=0;i<count;i++)try{
             String prefix="security."+i+".";Set<String> movable=new HashSet<>(Arrays.asList(lines(p,prefix+"movable")));
-            Graph graph=new Graph(movable);for(String token:lines(p,prefix+"fixed"))need(graph.bind(token,token),"Conflicting named contracts");
+            Set<String> detached=new HashSet<>();
+            for(String alias:p.getProperty(prefix+"detached","").split("\n"))if(!alias.isEmpty()){
+                need(Arrays.asList(lines(p,prefix+"methods")).contains(alias),"Detached helper must have a reviewed body");
+                detached.add("M:"+required(p,prefix+"method."+alias+".id"));
+            }
+            Graph graph=new Graph(movable,detached);for(String token:lines(p,prefix+"fixed"))need(graph.bind(token,token),"Conflicting named contracts");
             List<String> pending=new ArrayList<>(Arrays.asList(lines(p,prefix+"methods")));
             while(!pending.isEmpty()){
                 boolean progress=false;
-                for(Iterator<String> it=pending.iterator();it.hasNext();){String alias=it.next(),key=prefix+"method."+alias,id=required(p,key+".id");String[] refs=lines(p,key+".refs");
-                    Graph match=null;int matches=0;
-                    for(Candidate c:index.getOrDefault(required(p,key+".hash"),Collections.emptyList())){Graph g=bind(graph,id,refs,c);if(g!=null){match=g;matches++;}}
-                    need(matches>0,"No compatible Java method: "+alias);
-                    if(matches==1){graph=match;it.remove();progress=true;}
+                for(Iterator<String> it=pending.iterator();it.hasNext();){String alias=it.next(),key=prefix+"method."+alias,id=required(p,key+".id");
+                    Map<String,Graph> matches=new LinkedHashMap<>();
+                    for(String variant:methodVariants(p,key))for(String shape:shapeKeys(p,variant)){
+                        String[] refs=lines(p,variant+".refs");
+                        for(Candidate c:index.getOrDefault(shape,Collections.emptyList())){Graph g=bind(graph,id,refs,c);if(g!=null){
+                            Graph prior=matches.put(c.method.id(),g);need(prior==null||prior.values.equals(g.values),"Conflicting method variant bindings: "+alias);
+                        }}
+                    }
+                    need(!matches.isEmpty(),"No compatible Java method: "+alias);
+                    if(matches.size()==1){graph=matches.values().iterator().next();it.remove();progress=true;}
                 }
                 need(progress,"Ambiguous Java reference graph: "+pending);
             }
@@ -156,7 +187,10 @@ public final class JavaPrepare {
                 String contract=contracts.get(id);
                 if(contract!=null){
                 need(seenMethods.add(contract),"Duplicate or ambiguous framework method: "+contract+"; candidate="+id);String shape=normalizer.shape(m,false).hash;
-                need(Arrays.asList(lines(p,"framework.method."+id)).contains(shape),"Framework method logic changed: "+id+"\nexpected shape: "+String.join(", ",lines(p,"framework.method."+id))+"\nactual shape: "+shape);
+                boolean accepted=Arrays.asList(lines(p,"framework.method."+id)).contains(shape);
+                String canonical=p.getProperty("framework.canonical."+id);
+                if(!accepted&&canonical!=null)accepted=Arrays.asList(canonical.split("\n")).contains(normalizer.canonicalShape(m,false).hash);
+                need(accepted,"Framework method logic changed: "+id+"\nexpected shape: "+String.join(", ",lines(p,"framework.method."+id))+"\nactual shape: "+shape);
                 report.setProperty("framework.binding."+contract,id);
             }}
             for(Field f:cls.fields){String id=f.id();if(fields.contains(id))need(seenFields.add(id)&&Integer.toString(f.flags).equals(required(p,"framework.field."+id)),"Framework field changed: "+id);}

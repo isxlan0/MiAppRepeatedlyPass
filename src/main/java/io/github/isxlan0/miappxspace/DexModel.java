@@ -104,26 +104,31 @@ final class DexModel {
             return ref.substring(0,2)+normalizedType(owner,obfuscated)+"->"+(own&&!name.startsWith("<")?"*":name)+normalizedType(ref.substring(sig),obfuscated);
         }
         Shape shape(Method m,boolean obfuscated)throws Exception{return new Shape(this,m,obfuscated);}
+        Shape canonicalShape(Method m,boolean obfuscated)throws Exception{return new Shape(this,m,obfuscated,true);}
     }
     static final class Shape {
         final String hash;final List<String> refs=new ArrayList<>();
         final StringBuilder text=new StringBuilder();final Archive archive;final boolean obfuscated;
         void ref(String s){refs.add(s);text.append('{').append(archive.normalizeReference(s,obfuscated)).append('}');}
         void value(int n){String r=archive.resources.names.get(n);text.append(r==null?Integer.toHexString(n):"@"+r).append(',');}
-        Shape(Archive archive,Method m,boolean obfuscated)throws Exception {
+        Shape(Archive archive,Method m,boolean obfuscated)throws Exception {this(archive,m,obfuscated,false);}
+        Shape(Archive archive,Method m,boolean obfuscated,boolean canonical)throws Exception {
             this.archive=archive;this.obfuscated=obfuscated;Dex d=m.dex;byte[] b=d.b;
             text.append(m.flags&~(0x1000|0x40)).append('/').append(archive.normalizedType(m.proto,obfuscated)).append('/');
             // Definition and prototype references bind owners/types as well as code references.
             ref("T:"+m.owner);descriptorRefs(m.proto);
             if(m.code!=0){
                 range(b,m.code,16);int start=m.code+16,n=u4(b,m.code+12),tries=u2(b,m.code+6);range(b,start,n*2L);
+                CodePositions positions=canonical?new CodePositions(b,start,n):null;
                 text.append(u2(b,m.code)).append('/').append(u2(b,m.code+2)).append('/').append(u2(b,m.code+4)).append('/');
                 for(int pc=0;pc<n;){int p=start+pc*2,w=u2(b,p),op=w&255,width=width(op);
                     if(op==0&&w!=0){
                         int size=u2(b,p+2);if(w==0x100)width=at(4+size*2L);else if(w==0x200)width=at(2+size*4L);
                         else if(w==0x300){long count=Integer.toUnsignedLong(i4(b,p+4));width=at(4+(count*size+1)/2);}else throw new IllegalArgumentException("Unknown DEX payload");
                     }
-                    need(width>0&&width<=n-pc,"Unknown/truncated DEX instruction");text.append(Integer.toHexString(w)).append(':');
+                    need(width>0&&width<=n-pc,"Unknown/truncated DEX instruction");
+                    if(canonical&&canonicalInstruction(d,p,pc,w,width,positions)){text.append(';');pc+=width;continue;}
+                    text.append(Integer.toHexString(w)).append(':');
                     if(op==0x1a||op==0x1b){int id=op==0x1a?u2(b,p+2):u4(b,p+2);String s=d.string(id);text.append('s').append(s.length()).append(':').append(s);}
                     else if(op==0x1c||op==0x1f||op==0x20||op==0x22||op==0x23||op==0x24||op==0x25){ref("T:"+d.type(u2(b,p+2)));for(int j=2;j<width;j++)value(u2(b,p+j*2));}
                     else if(op>=0x52&&op<=0x6d){ref("F:"+d.field(u2(b,p+2)).id());}
@@ -137,14 +142,53 @@ final class DexModel {
                 int handlers=t+tries*8;Map<Integer,String> handlerText=new HashMap<>();
                 if(tries>0){Cursor c=new Cursor(b,handlers);int count=c.leb();need(count<=b.length,"Invalid catch handlers");for(int i=0;i<count;i++){
                     int offset=c.p-handlers,size=c.sleb();need(size!=Integer.MIN_VALUE&&Math.abs(size)<=b.length,"Invalid catch count");StringBuilder h=new StringBuilder();
-                    for(int j=0;j<Math.abs(size);j++){String type=d.type(c.leb());int target=c.leb();need(target<n,"Catch target outside code");ref("T:"+type);h.append(archive.normalizedType(type,obfuscated)).append('@').append(target).append(',');}
-                    if(size<=0){int target=c.leb();need(target<n,"Catch-all outside code");h.append('*').append(target);}handlerText.put(offset,h.toString());
+                    for(int j=0;j<Math.abs(size);j++){String type=d.type(c.leb());int target=c.leb();need(target<n,"Catch target outside code");ref("T:"+type);h.append(archive.normalizedType(type,obfuscated)).append('@').append(canonical?positions.target(target):target).append(',');}
+                    if(size<=0){int target=c.leb();need(target<n,"Catch-all outside code");h.append('*').append(canonical?positions.target(target):target);}handlerText.put(offset,h.toString());
                 }}
-                for(int i=0;i<tries;i++){int p=t+i*8,first=u4(b,p),length=u2(b,p+4);need(first<=n&&length<=n-first,"Invalid try range");String h=handlerText.get(u2(b,p+6));need(h!=null,"Invalid catch offset");text.append(first).append('+').append(length).append('=').append(h).append(';');}
+                for(int i=0;i<tries;i++){int p=t+i*8,first=u4(b,p),length=u2(b,p+4);need(first<=n&&length<=n-first,"Invalid try range");String h=handlerText.get(u2(b,p+6));need(h!=null,"Invalid catch offset");text.append(canonical?positions.target(first):first).append('+').append(canonical?positions.boundary(first+length)-positions.target(first):length).append('=').append(h).append(';');}
             }else text.append("no-code");
             hash=sha(text.toString().getBytes(StandardCharsets.UTF_8));
         }
         void descriptorRefs(String s){for(int i=0;i<s.length();i++)if(s.charAt(i)=='L'){int end=s.indexOf(';',i);need(end>=0,"Invalid type");ref("T:"+s.substring(i,end+1));i=end;}}
+        // Canonicalize encodings, not behavior: registers, values, conditions,
+        // referenced members and logical branch/exception targets stay exact.
+        boolean canonicalInstruction(Dex d,int p,int pc,int w,int width,CodePositions positions){
+            byte[] b=d.b;int op=w&255;
+            if(op==0x1a||op==0x1b){String s=d.string(op==0x1a?u2(b,p+2):u4(b,p+2));text.append("string:").append(w>>>8).append(':').append(s.length()).append(':').append(s);}
+            else if(op>=1&&op<=9){int kind=(op-1)/3,form=(op-1)%3;int dest=form==0?(w>>8)&15:form==1?w>>>8:u2(b,p+2);int src=form==0?w>>>12:u2(b,p+(form==1?2:4));text.append("move").append(kind).append(':').append(dest).append(',').append(src);}
+            else if(op>=0x12&&op<=0x15){int dest=op==0x12?(w>>8)&15:w>>>8;int value=op==0x12?(short)w>>12:op==0x13?(short)u2(b,p+2):op==0x14?i4(b,p+2):u2(b,p+2)<<16;text.append("const:").append(dest).append(':');value(value);}
+            else if(op>=0x28&&op<=0x2a){int delta=op==0x28?(byte)(w>>>8):op==0x29?(short)u2(b,p+2):i4(b,p+2);text.append("goto:").append(positions.target((long)pc+delta));}
+            else if(op>=0x32&&op<=0x3d){text.append(Integer.toHexString(w)).append(":target=").append(positions.target((long)pc+(short)u2(b,p+2)));}
+            else if(op==0x26||op==0x2b||op==0x2c){long target=(long)pc+i4(b,p+2);positions.payload(target,op==0x26?0x300:op==0x2b?0x100:0x200);text.append(Integer.toHexString(w)).append(":payload=").append(positions.boundary(target));}
+            else if(w==0x100||w==0x200){int count=u2(b,p+2),owner=positions.owner(pc);text.append(Integer.toHexString(w)).append(':').append(count).append(':');
+                for(int i=0;i<count;i++){int key=w==0x100?i4(b,p+4)+i:i4(b,p+4+4*i);int delta=i4(b,p+(w==0x100?8+4*i:4+4*count+4*i));text.append(key).append('@').append(positions.target((long)owner+delta)).append(',');}
+            }else if((op>=0x6e&&op<=0x72)||(op>=0x74&&op<=0x78)){
+                boolean range=op>=0x74;int count=range?w>>>8:w>>>12;need(range||count<=5,"Invalid invoke register count");
+                text.append("invoke:").append(range?op-6:op).append(':');ref("M:"+d.method(u2(b,p+2)).id());text.append(count).append(':');
+                int regs=u2(b,p+4);for(int i=0;i<count;i++)text.append(range?regs+i:i==4?(w>>8)&15:(regs>>(4*i))&15).append(',');
+            }else return false;
+            return true;
+        }
+    }
+    static final class CodePositions {
+        final Map<Integer,Integer> positions=new HashMap<>(),payloads=new HashMap<>(),owners=new HashMap<>();final int size;
+        CodePositions(byte[] b,int start,int n){size=n;int ordinal=0;
+            for(int pc=0;pc<n;){int p=start+2*pc,w=u2(b,p),step=width(w&255);positions.put(pc,ordinal++);
+                if((w&255)==0&&w!=0){int count=u2(b,p+2);payloads.put(pc,w);
+                    if(w==0x100)step=at(4+2L*count);else if(w==0x200)step=at(2+4L*count);else if(w==0x300)step=at(4+(Integer.toUnsignedLong(i4(b,p+4))*count+1)/2);else throw new IllegalArgumentException("Unknown DEX payload");
+                }
+                need(step>0&&step<=n-pc,"Unknown/truncated DEX instruction");pc+=step;
+            }positions.put(n,ordinal);
+            for(int pc=0;pc<n;){int p=start+2*pc,w=u2(b,p),op=w&255;
+                if(op==0x2b||op==0x2c){int target=at((long)pc+i4(b,p+2));payload(target,op==0x2b?0x100:0x200);need(owners.put(target,pc)==null,"Shared switch payload is unsupported");}
+                // Walk using the already checked instruction boundaries.
+                int step=width(op);if(payloads.containsKey(pc)){int count=u2(b,p+2);step=w==0x100?at(4+2L*count):w==0x200?at(2+4L*count):at(4+(Integer.toUnsignedLong(i4(b,p+4))*count+1)/2);}pc+=step;
+            }
+        }
+        int boundary(long pc){Integer index=pc>=0&&pc<=size?positions.get((int)pc):null;need(index!=null,"DEX target is not an instruction boundary");return index;}
+        int target(long pc){need(pc<size&&!payloads.containsKey((int)pc),"DEX branch/catch targets data or end");return boundary(pc);}
+        void payload(long pc,int kind){need(pc>=0&&pc<size&&Objects.equals(payloads.get((int)pc),kind),"Wrong DEX payload target");}
+        int owner(int pc){Integer owner=owners.get(pc);need(owner!=null,"Orphaned switch payload");return owner;}
     }
     static int width(int op){
         if(op==0x18)return 5;

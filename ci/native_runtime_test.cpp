@@ -24,11 +24,20 @@ static uintptr_t map_library(int fd,const MiappLibraryLayout& layout){
 }
 int main(int argc,char** argv){
     assert(argc==3||argc==4);MiappLayout expected{};std::ifstream in(argv[1],std::ios::binary);assert(in.read(reinterpret_cast<char*>(&expected),sizeof(expected)));assert(expected.ready==1);
+    // OTA audits can supply just the two verified ZIP offsets when an unrelated
+    // system-library refusal prevents the Java scanner producing a full layout.
+    // The production C++ scanner must discover every code address independently.
+    bool probe=argc==4&&std::strcmp(argv[3],"probe")==0;
     statusPath=std::string(argv[1])+".native.status";
     int fd=open(argv[2],O_RDONLY);assert(fd>=0);uintptr_t dart=map_library(fd,expected.dart);
     uintptr_t pendingDart=0,pendingNative=0;assert(miapp_scan_runtime(miapp_layout,pendingDart,pendingNative)==0&&miapp_layout.ready==0);
     assert(try_install()==MiappInstallState::Pending);
     uintptr_t native=map_library(fd,expected.native);close(fd);
+    if(probe){
+        MiappLayout discovered{};uintptr_t a=0,b=0;
+        if(miapp_scan_runtime(discovered,a,b)!=1){std::fprintf(stderr,"OTA runtime recognition refused: %s\n",miapp_scan_error());return 2;}
+        assert(a==dart&&b==native);expected=discovered;
+    }
     if(argc==4&&std::strcmp(argv[3],"refuse")==0){
         assert(miapp_scan_runtime(miapp_layout,pendingDart,pendingNative)==-1&&miapp_layout.ready==0);
         puts("PASS: unsupported or ambiguous APK instructions rejected before publication");return 0;
@@ -45,7 +54,7 @@ int main(int argc,char** argv){
         uintptr_t at=native+expected.native.codeAddress,page=at&~(pageSize-1);
         assert(!mprotect(reinterpret_cast<void*>(page),pageSize,PROT_READ|PROT_WRITE|PROT_EXEC));*reinterpret_cast<uint32_t*>(at)^=1;
         assert(!mprotect(reinterpret_cast<void*>(page),pageSize,PROT_READ|PROT_EXEC));
-    }else if(argc==4){
+    }else if(argc==4&&!probe){
         size_t size=sysconf(_SC_PAGESIZE);uintptr_t at=native+expected.encode,page=at&~(size-1);
         assert(!mprotect(reinterpret_cast<void*>(page),size,PROT_READ|PROT_WRITE|PROT_EXEC));*reinterpret_cast<uint32_t*>(at)^=1;
         assert(!mprotect(reinterpret_cast<void*>(page),size,PROT_READ|PROT_EXEC));
@@ -65,6 +74,7 @@ int main(int argc,char** argv){
     assert((*reinterpret_cast<uint32_t*>(dart+miapp_layout.labelEntry)&0xfc000000)==0x14000000);
     assert((*reinterpret_cast<uint32_t*>(native+miapp_layout.titleCall)&0xfc000000)==0x94000000);
     assert((*reinterpret_cast<uint32_t*>(native+miapp_layout.encode)&0xfc000000)==0x14000000);
-    puts("PASS: runtime scan matches Java recognizer; all 8 patches complete before first native API return after pending mappings");
+    puts(probe?"PASS: production runtime recognition and all 8 private-map patches; no ROM functions executed":
+        "PASS: runtime scan matches Java recognizer; all 8 patches complete before first native API return after pending mappings");
     return 0;
 }

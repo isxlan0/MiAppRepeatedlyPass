@@ -164,7 +164,9 @@ public final class NativePrepare {
         out.put(MAGIC).putLong(1).putLong(1);dart.layout(out);nativeLib.layout(out);
         long[] badges=new long[5];
         for(int i=0;i<5;i++){badges[i]=d.unique("Dart badge "+i,BADGES[i]);require(d.matches(badges[i],BADGES[i],false),"Dart instruction mismatch");out.putLong(badges[i]);log(report,"dart.badge."+i,badges[i]);}
-        require(badges[1]-badges[0]==0xd0,"Dart paired predicate control flow changed");
+        require(d.matches(badges[0],NativePatterns.BADGE_FIRST_BODY,true)&&d.matches(badges[1],NativePatterns.BADGE_SECOND_BODY,true)
+                &&d.branchTarget(badges[0]+0x20,true)==d.branchTarget(badges[1]+0x64,true)
+                &&d.branchTarget(badges[0]+0x30,true)==d.branchTarget(badges[1]+0x74,true),"Dart paired predicate control flow changed");
         long label=d.unique("Dart label",NativePatterns.LABEL_HEAD);
         long target=d.branchTarget(label+56,false);
         require(target==label+176&&d.matches(target,NativePatterns.LABEL_TARGET,false),"Dart fallback label control flow changed");
@@ -188,14 +190,21 @@ public final class NativePrepare {
                 Symbol predicate=e.symbol("Security_is_xspace_user_id"),object=e.symbol("Security_is_xspace_user");
                 int[] idCode={0xd503233f,0xa9bf7bfd,0x910003fd,0x710f9c1f,0x1a9f17e0,0xa8c17bfd,0xd50323bf,0xd65f03c0};
                 int[] tailCode={0xd503233f,0xa9bf7bfd,0x910003fd,0xa8c17bfd,0xd50323bf,0x14000187};
-                require(predicate.size==32&&e.matches(predicate.address,idCode,false),"Security user-id predicate ABI changed");
+                int[] plainId={0xa9bf7bfd,0x910003fd,0x710f9c1f,0x1a9f17e0,0xa8c17bfd,0xd65f03c0};
+                int[] plainTail={0xa9bf7bfd,0x910003fd,0xa8c17bfd,0x14000187};
+                boolean pac=predicate.size==32&&e.matches(predicate.address,idCode,false);
+                require(pac||(predicate.size==24&&e.matches(predicate.address,plainId,false)),"Security user-id predicate ABI changed");
                 Symbol current=e.symbol("Security_get_current_user_id");
-                require(object.size==24&&e.matches(object.address,tailCode,true)&&current.size==24&&e.matches(current.address,tailCode,true),"Security user object ABI changed");
-            }else if(i==1){Symbol s=e.symbol("PackageManager_get_user_badged_icon");require(s.size==NativePatterns.PUBLIC_BADGE.length*4&&e.matches(s.address,NativePatterns.PUBLIC_BADGE,true),"Public badge ABI changed");}
-            else {Symbol s=e.symbol(PRIVATE);require((s.size==NativePatterns.RUST_EARLY.length*4&&e.matches(s.address,NativePatterns.RUST_EARLY,true))||(s.size==NativePatterns.RUST_CURRENT.length*4&&e.matches(s.address,NativePatterns.RUST_CURRENT,true)),"Rust badge ABI changed");log(report,"rust.badge",s.address);}
+                int[] tail=pac?tailCode:plainTail;
+                require(object.size==tail.length*4&&e.matches(object.address,tail,true)&&current.size==tail.length*4&&e.matches(current.address,tail,true),"Security user object ABI changed");
+            }else if(i==1){require(function(e,"PackageManager_get_user_badged_icon",NativePatterns.PUBLIC_BADGE,NativePatterns.PUBLIC_BADGE_STACK),"Public badge ABI changed");}
+            else {require(function(e,PRIVATE,NativePatterns.RUST_EARLY,NativePatterns.RUST_CURRENT,NativePatterns.RUST_EARLY_STACK,NativePatterns.RUST_CURRENT_STACK),"Rust badge ABI changed");log(report,"rust.badge",e.symbol(PRIVATE).address);}
             report.setProperty(NAMES[i]+".sha256",sha(e.data));
         }
         return out.array();
+    }
+    private static boolean function(Elf e,String name,int[]... patterns){
+        Symbol s=e.symbol(name);for(int[] p:patterns)if(s.size==p.length*4&&e.matches(s.address,p,true))return true;return false;
     }
     private static void publish(File module,File libraries,byte[] layout,Properties report)throws Exception{
         File dir=new File(module,"system/system_ext/lib64");require(dir.isDirectory(),"Missing staged wrappers");

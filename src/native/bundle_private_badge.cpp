@@ -5,6 +5,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <android/log.h>
+#include <initializer_list>
+#include "rust_entry.h"
 
 // The Flutter launcher calls this Rust export directly, bypassing the public C bridge.
 // Verified ROM AArch64 ABI: self in x0, UserHandle* in x1, 40-byte result in x8.
@@ -24,9 +26,7 @@ __attribute__((constructor)) static void intercept_internal_calls(){
     original=reinterpret_cast<Function>(entry);
     // Internal Rust calls use direct branches and bypass ELF symbol interposition.
     // These four pinned instructions contain no PC-relative operands; preserve PAC and stack setup.
-    const uint8_t expected[]={0x3f,0x23,0x03,0xd5,0xff,0xc3,0x02,0xd1,0xfd,0x7b,0x07,0xa9,0xf7,0x43,0x00,0xf9};
-    const uint8_t earlier[]={0x3f,0x23,0x03,0xd5,0xff,0x43,0x02,0xd1,0xfd,0x7b,0x06,0xa9,0xf6,0x57,0x07,0xa9};
-    if(std::memcmp(entry,expected,16)!=0&&std::memcmp(entry,earlier,16)!=0){__android_log_print(ANDROID_LOG_ERROR,"MiAppNativeBadge","Rust entry mismatch");return;}
+    if(!miapp::rustEntry(entry)){__android_log_print(ANDROID_LOG_ERROR,"MiAppNativeBadge","Rust entry mismatch");return;}
     size_t pageSize=static_cast<size_t>(sysconf(_SC_PAGESIZE));
     auto trampoline=reinterpret_cast<uint8_t*>(mmap(nullptr,pageSize,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0));
     if(trampoline==MAP_FAILED)return;
@@ -34,11 +34,12 @@ __attribute__((constructor)) static void intercept_internal_calls(){
     __builtin___clear_cache(reinterpret_cast<char*>(trampoline),reinterpret_cast<char*>(trampoline+32));
     if(mprotect(trampoline,pageSize,PROT_READ|PROT_EXEC)!=0){munmap(trampoline,pageSize);return;}
     auto page=reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(entry)&~(pageSize-1));
-    if(mprotect(page,pageSize,PROT_READ|PROT_WRITE|PROT_EXEC)!=0){munmap(trampoline,pageSize);__android_log_print(ANDROID_LOG_ERROR,"MiAppNativeBadge","Rust entry protection refused");return;}
+    size_t span=((reinterpret_cast<uintptr_t>(entry)+16-reinterpret_cast<uintptr_t>(page)+pageSize-1)/pageSize)*pageSize;
+    if(mprotect(page,span,PROT_READ|PROT_WRITE|PROT_EXEC)!=0){munmap(trampoline,pageSize);__android_log_print(ANDROID_LOG_ERROR,"MiAppNativeBadge","Rust entry protection refused");return;}
     original=reinterpret_cast<Function>(trampoline);
     absolute_jump(entry,reinterpret_cast<void*>(clone_badge));
     __builtin___clear_cache(reinterpret_cast<char*>(entry),reinterpret_cast<char*>(entry+16));
-    mprotect(page,pageSize,PROT_READ|PROT_EXEC);
+    mprotect(page,span,PROT_READ|PROT_EXEC);
     __android_log_print(ANDROID_LOG_INFO,"MiAppNativeBadge","Rust direct calls intercepted");
 }
 extern "C" __attribute__((visibility("default"))) RustBadgeResult clone_badge(void* manager,const int32_t* user){

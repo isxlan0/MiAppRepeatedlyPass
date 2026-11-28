@@ -142,7 +142,9 @@ int miapp_scan_runtime(MiappLayout& output,uintptr_t& dartBase,uintptr_t& native
         using miapp::pattern;
         const miapp::Pattern badges[]={pattern(miapp::BADGE_0),pattern(miapp::BADGE_1),pattern(miapp::BADGE_2),pattern(miapp::BADGE_3),pattern(miapp::BADGE_4)};
         for(int i=0;i<5;i++){result.badges[i]=d.unique("Dart badge",{badges[i]});miapp::require(d.matches(result.badges[i],badges[i],false),"Dart badge instructions changed");}
-        miapp::require(result.badges[1]-result.badges[0]==0xd0,"Dart paired predicate control flow changed");
+        miapp::require(d.matches(result.badges[0],pattern(miapp::BADGE_FIRST_BODY))&&d.matches(result.badges[1],pattern(miapp::BADGE_SECOND_BODY))
+            &&d.branch(result.badges[0]+0x20,true)==d.branch(result.badges[1]+0x64,true)
+            &&d.branch(result.badges[0]+0x30,true)==d.branch(result.badges[1]+0x74,true),"Dart paired predicate control flow changed");
         result.labelEntry=d.unique("Dart label",{pattern(miapp::LABEL_HEAD)});result.labelTarget=d.branch(result.labelEntry+56,false);
         miapp::require(result.labelTarget==result.labelEntry+176&&d.matches(result.labelTarget,pattern(miapp::LABEL_TARGET),false),"Dart fallback control flow changed");
         result.titleCall=n.unique("Activity label call",{pattern(miapp::TITLE_CALL)})+20;result.getText=n.branch(result.titleCall,true);
@@ -151,6 +153,8 @@ int miapp_scan_runtime(MiappLayout& output,uintptr_t& dartBase,uintptr_t& native
         result.getUser=n.plt("LauncherActivityInfoInternal_get_user");result.getId=n.plt("UserHandle_get_handle");
         for(int i=0;i<4;i++){result.titleExpected[i]=n.instruction(result.titleCall+i*4);result.encodeExpected[i]=n.instruction(result.encode+i*4);}
         for(int i=0;i<5;i++)guard(d,dart.map.start,result.badges[i],20,"badge predicate");
+        guard(d,dart.map.start,result.badges[0],sizeof(miapp::BADGE_FIRST_BODY),"first predicate flow");
+        guard(d,dart.map.start,result.badges[1],sizeof(miapp::BADGE_SECOND_BODY),"second predicate flow");
         guard(d,dart.map.start,result.labelEntry,176+sizeof(miapp::LABEL_TARGET),"label resolver");
         guard(n,native.map.start,result.titleCall-20,sizeof(miapp::TITLE_CALL),"activity title call");
         guard(n,native.map.start,result.getText,n.matches(result.getText,pattern(miapp::TEXT_EARLY))?sizeof(miapp::TEXT_EARLY):sizeof(miapp::TEXT_CURRENT),"get_text");

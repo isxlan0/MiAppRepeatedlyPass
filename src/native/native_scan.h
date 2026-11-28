@@ -129,13 +129,20 @@ struct Elf {
 inline constexpr const char* names[]={"libhyper_os_security_public.so","libhyper_os_bundle_public.so","libhyper_os_bundle_private.dylib.so"};
 inline constexpr const char* originals[]={"libmiapp_security_original.so","libmiapp_bundle_original.so","libmiapp_bundle_private_orig.so"};
 inline constexpr const char* privateBadge="_RNvMs4_NtNtCs2Z0Otu41e4o_23hyper_os_bundle_private2pm15package_managerNtB5_14PackageManager20get_user_badged_icon";
+inline bool function(const Elf& e,const char* name,std::initializer_list<Pattern> patterns){
+    auto s=e.symbol(name);for(auto p:patterns)if(s.st_size==p.size*4&&e.matches(s.st_value,p))return true;return false;
+}
 inline void validateSystem(const Elf& e,int index){
     if(index==0){
         const uint32_t predicate[]={0xd503233f,0xa9bf7bfd,0x910003fd,0x710f9c1f,0x1a9f17e0,0xa8c17bfd,0xd50323bf,0xd65f03c0};
         const uint32_t tail[]={0xd503233f,0xa9bf7bfd,0x910003fd,0xa8c17bfd,0xd50323bf,0x14000187};
-        auto s=e.symbol("Security_is_xspace_user_id");require(s.st_size==sizeof(predicate)&&e.matches(s.st_value,pattern(predicate),false),"Security predicate ABI changed");
-        for(auto name:{"Security_is_xspace_user","Security_get_current_user_id"}){s=e.symbol(name);require(s.st_size==sizeof(tail)&&e.matches(s.st_value,pattern(tail)),"Security object ABI changed");}
-    }else if(index==1){auto s=e.symbol("PackageManager_get_user_badged_icon");require(s.st_size==sizeof(PUBLIC_BADGE)&&e.matches(s.st_value,pattern(PUBLIC_BADGE)),"Public badge ABI changed");}
-    else {auto s=e.symbol(privateBadge);require((s.st_size==sizeof(RUST_EARLY)&&e.matches(s.st_value,pattern(RUST_EARLY)))||(s.st_size==sizeof(RUST_CURRENT)&&e.matches(s.st_value,pattern(RUST_CURRENT))),"Rust badge ABI changed");}
+        const uint32_t plainPredicate[]={0xa9bf7bfd,0x910003fd,0x710f9c1f,0x1a9f17e0,0xa8c17bfd,0xd65f03c0};
+        const uint32_t plainTail[]={0xa9bf7bfd,0x910003fd,0xa8c17bfd,0x14000187};
+        auto s=e.symbol("Security_is_xspace_user_id");bool pac=s.st_size==sizeof(predicate)&&e.matches(s.st_value,pattern(predicate),false);
+        require(pac||(s.st_size==sizeof(plainPredicate)&&e.matches(s.st_value,pattern(plainPredicate),false)),"Security predicate ABI changed");
+        auto p=pac?pattern(tail):pattern(plainTail);
+        for(auto name:{"Security_is_xspace_user","Security_get_current_user_id"}){s=e.symbol(name);require(s.st_size==p.size*4&&e.matches(s.st_value,p),"Security object ABI changed");}
+    }else if(index==1){require(function(e,"PackageManager_get_user_badged_icon",{pattern(PUBLIC_BADGE),pattern(PUBLIC_BADGE_STACK)}),"Public badge ABI changed");}
+    else {require(function(e,privateBadge,{pattern(RUST_EARLY),pattern(RUST_CURRENT),pattern(RUST_EARLY_STACK),pattern(RUST_CURRENT_STACK)}),"Rust badge ABI changed");}
 }
 }
